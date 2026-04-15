@@ -1,7 +1,8 @@
 # MaschineMK2_linux
 **MaschineMK2_linux is an open-source program that allows you to (possibly) use your Maschine MK2 device on linux**
 
-Works on atleast ubuntu and fedora, but most distros that ship alsa, jack and QjackCtl or similar should work.
+Works on atleast ubuntu and fedora, but most distros should work.
+Use pipewire and pipewire-jack or whatever.
 
 Forked from https://github.com/wrl/maschine.rs
 Without the maschine.rs project I would not have a working MIDI controller right now!
