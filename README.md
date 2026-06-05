@@ -52,6 +52,15 @@ Settings saved to `maschine.json` in the working directory. Loaded on startup. E
 - **Shift + tap pad A → tap pad B** — set pad A's step note to pad B's note
 - **Play** starts the sequencer on the current page
 
+### MIDI Clock Sync (experimental)
+Connect any MIDI host (DAW, Zynthian, hardware sequencer) to the `MIDI Control` input port and send MIDI Clock.
+
+- **External clock** — sequencer steps follow incoming 24ppqn Clock ticks (6 ticks = one 16th-note step); Start resets to step 0 and begins playback; Stop halts playback and preserves position
+- **Fallback** — if no Clock tick arrives within 500 ms of the last one, sequencer automatically falls back to internal BPM timer so playback doesn't stall
+- **BPM display** — estimated BPM derived from tick interval, emitted as `clock_bpm` event over the WebSocket
+
+Connect from Zynthian or a DAW: `aconnect <zynthian-output-port> <maschine-MIDI-Control-port>`
+
 ---
 
 ## Requirements
