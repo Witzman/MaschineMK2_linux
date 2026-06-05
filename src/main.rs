@@ -52,7 +52,7 @@ mod midi_parse;
 mod config;
 mod sequencer;
 mod clock;
-use clock::{ClockSource, ClockState};
+use clock::ClockSource;
 use config::MaschineConfig;
 
 use crate::base::{Maschine, MaschineButton, MaschineHandler};
@@ -71,6 +71,7 @@ fn ev_loop(dev: &mut dyn Maschine, mhandler: &mut MHandler) {
     let mut now_display = SystemTime::now();
     let timer_interval = Duration::from_millis(16);
     let display_interval = Duration::from_millis(100);
+    let clock_fallback_timeout = Duration::from_millis(500);
     let mut timer_interval2;
     let mut step = 0;
     let mut check = 0;
@@ -177,6 +178,12 @@ fn ev_loop(dev: &mut dyn Maschine, mhandler: &mut MHandler) {
             dev.write_display();
             now_display = SystemTime::now();
         }
+
+        if dev.get_clock_state().should_fallback_to_internal(clock_fallback_timeout) {
+            dev.set_clock_source(ClockSource::Internal);
+            now2 = SystemTime::now();
+        }
+
         if dev.get_playing() == true {
             timer_interval2 = Duration::from_millis(dev.get_seq_speed());
             active = true;
