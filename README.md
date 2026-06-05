@@ -44,9 +44,13 @@ Settings saved to `maschine.json` in the working directory. Loaded on startup. E
 
 ### Sequencer Mode (experimental)
 - Activate: **Shift + Pad Mode** twice
-- Press pads to toggle steps on/off (lit = active)
-- **Shift + tap pad A → tap pad B** changes pad A's note to pad B's note
-- **Play** starts the sequencer
+- **Group A–H** — switch between 8 independent 16-step pages; lit button = active page
+- Press pads to toggle steps on/off (lit = active); pressing a step also **selects** it (orange LED)
+- **Encoder 1** (while step selected) — adjust that step's velocity (0–127)
+- **Encoder 2** (while step selected) — adjust that step's note offset (0–127)
+- **Shift + Group A–H** — fill current page with Euclidean rhythm (1–8 hits evenly distributed)
+- **Shift + tap pad A → tap pad B** — set pad A's step note to pad B's note
+- **Play** starts the sequencer on the current page
 
 ---
 
