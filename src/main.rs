@@ -16,7 +16,7 @@
 //  <http://www.gnu.org/licenses/>.
 
 use std::env;
-use std::os::unix::io::AsRawFd;
+use std::os::unix::io::{AsRawFd, RawFd};
 use std::path::Path;
 
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, UdpSocket};
@@ -31,6 +31,7 @@ use nix::{fcntl, sys};
 extern crate alsa_seq;
 extern crate midi;
 use alsa_seq::*;
+use alsa_seq::SeqInputEvent;
 use midi::*;
 
 extern crate hsl;
@@ -41,19 +42,32 @@ extern crate tinyosc;
 use tinyosc as osc;
 
 mod base;
+mod cc_math;
 mod devices;
+mod display;
+mod font;
+mod ws_types;
+mod ws_server;
+mod midi_parse;
+mod config;
+use config::MaschineConfig;
 
-use base::{maschine, Maschine, MaschineButton, MaschineHandler};
+use crate::base::{Maschine, MaschineButton, MaschineHandler};
+use std::sync::mpsc;
+use crate::ws_types::{DeviceEvent, WsCommand};
 
 fn ev_loop(dev: &mut dyn Maschine, mhandler: &mut MHandler) {
     let mut fds = [
         PollFd::new(dev.get_fd(), POLLIN, EventFlags::empty()),
         PollFd::new(mhandler.osc_socket.as_raw_fd(), POLLIN, EventFlags::empty()),
+        PollFd::new(mhandler.seq_in_fd, POLLIN, EventFlags::empty()),
     ];
 
     let mut now = SystemTime::now();
     let mut now2 = SystemTime::now();
+    let mut now_display = SystemTime::now();
     let timer_interval = Duration::from_millis(16);
+    let display_interval = Duration::from_millis(100);
     let mut timer_interval2;
     let mut step = 0;
     let mut check = 0;
@@ -69,9 +83,86 @@ fn ev_loop(dev: &mut dyn Maschine, mhandler: &mut MHandler) {
             mhandler.recv_osc_msg(dev);
         }
 
+        if mhandler.seq_in_fd >= 0 && fds[2].revents().unwrap().contains(POLLIN) {
+            while let Some(ev) = mhandler.seq_handle.try_receive_event() {
+                match ev {
+                    SeqInputEvent::NoteOn { note, velocity, .. } if note < 16 => {
+                        let brightness = if velocity == 0 {
+                            PAD_RELEASED_BRIGHTNESS
+                        } else {
+                            velocity as f32 / 127.0
+                        };
+                        let color = mhandler.pad_color();
+                        dev.set_pad_light(note as usize, color, brightness);
+                    }
+                    SeqInputEvent::NoteOff { note, .. } if note < 16 => {
+                        let color = mhandler.pad_color();
+                        dev.set_pad_light(note as usize, color, PAD_RELEASED_BRIGHTNESS);
+                    }
+                    SeqInputEvent::Clock => {
+                        let _ = mhandler.seq_port.send_message(&Message::TimingClock);
+                        mhandler.seq_handle.drain_output();
+                    }
+                    SeqInputEvent::Start => {
+                        let _ = mhandler.seq_port.send_message(&Message::Start);
+                        mhandler.seq_handle.drain_output();
+                    }
+                    SeqInputEvent::Stop => {
+                        let _ = mhandler.seq_port.send_message(&Message::Stop);
+                        mhandler.seq_handle.drain_output();
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        while let Ok(cmd) = mhandler.cmd_rx.try_recv() {
+            match cmd {
+                WsCommand::SetPadColor { pad, color, brightness } => {
+                    dev.set_pad_light(pad, color, brightness);
+                }
+                WsCommand::SetButtonColor { button, brightness } => {
+                    if let Some(btn) = osc_button_to_btn_map(&button) {
+                        dev.set_button_light(btn, 0xFFFFFF, brightness);
+                    }
+                }
+                WsCommand::SetNoteBase { base } => {
+                    dev.set_midi_note_base(base);
+                }
+                WsCommand::SetPadNote { pad, note } => {
+                    if pad < 16 {
+                        mhandler.pad_notes[pad] = note;
+                        MaschineConfig {
+                            pad_notes: mhandler.pad_notes,
+                            encoder_ccs: mhandler.encoder_ccs,
+                        }.save();
+                    }
+                }
+                WsCommand::SetEncoderCC { encoder, cc } => {
+                    if encoder < 8 {
+                        mhandler.encoder_ccs[encoder] = cc;
+                        MaschineConfig {
+                            pad_notes: mhandler.pad_notes,
+                            encoder_ccs: mhandler.encoder_ccs,
+                        }.save();
+                    }
+                }
+                WsCommand::RequestConfig => {
+                    let _ = mhandler.event_tx.send(DeviceEvent::ConfigSnapshot {
+                        pad_notes: mhandler.pad_notes.to_vec(),
+                        encoder_ccs: mhandler.encoder_ccs.to_vec(),
+                    });
+                }
+            }
+        }
+
         if now.elapsed().unwrap() >= timer_interval {
             dev.write_lights();
             now = SystemTime::now();
+        }
+        if now_display.elapsed().unwrap() >= display_interval {
+            dev.write_display();
+            now_display = SystemTime::now();
         }
         if dev.get_playing() == true {
             timer_interval2 = Duration::from_millis(dev.get_seq_speed());
@@ -131,6 +222,14 @@ struct MHandler<'a> {
 
     osc_socket: &'a UdpSocket,
     osc_outgoing_addr: SocketAddr,
+
+    event_tx: mpsc::Sender<DeviceEvent>,
+    cmd_rx: mpsc::Receiver<WsCommand>,
+
+    seq_in_fd: RawFd,
+
+    pad_notes: [u8; 16],
+    encoder_ccs: [u16; 8],
 }
 
 fn osc_button_to_btn_map(osc_button: &str) -> Option<MaschineButton> {
@@ -621,358 +720,287 @@ impl<'a> MHandler<'a> {
             self.seq_handle.drain_output();
         }
 
-        if is_down == true && status <= 250 {
+        if status <= 250 {
             match button {
                 "play" => {
-                    if status > 0 && maschine.get_padmode() != 2 {
-                        let msg = Message::RPN7(Ch1, 1, status as u8);
+                    if maschine.get_padmode() != 2 {
+                        let msg = Message::RPN7(Ch1, 1, cc_math::button_cc_value(is_down));
                         self.seq_port.send_message(&msg).unwrap();
                         self.seq_handle.drain_output();
-                    } else if maschine.get_padmode() == 2 {
+                    } else if is_down {
                         maschine.set_playing(1);
-                        println!("playing notes");
                     };
                 }
 
                 "stop" => {
-                    if status > 0 && maschine.get_padmode() != 2 {
-                        let msg = Message::RPN7(Ch1, 2, status as u8);
+                    if maschine.get_padmode() != 2 {
+                        let msg = Message::RPN7(Ch1, 2, cc_math::button_cc_value(is_down));
                         self.seq_port.send_message(&msg).unwrap();
                         self.seq_handle.drain_output();
-                    } else {
+                    } else if !is_down {
                         maschine.set_playing(0);
-                        println!("stop");
-                        //let msg2 = Message::AllNotesOff(Ch2);
-                        //self.seq_port.send_message(&msg2).unwrap();
-                        //self.seq_handle.drain_output();
                     }
                 }
                 "rec" => {
-                    if status > 0 {
-                        let msg = Message::RPN7(Ch1, 3, status as u8);
-                        self.seq_port.send_message(&msg).unwrap();
-                        self.seq_handle.drain_output();
-                    }
+                    let msg = Message::RPN7(Ch1, 3, cc_math::button_cc_value(is_down));
+                    self.seq_port.send_message(&msg).unwrap();
+                    self.seq_handle.drain_output();
                 }
                 "grid" => {
-                    if status > 0 {
-                        let msg = Message::RPN7(Ch1, 4, status as u8);
-                        self.seq_port.send_message(&msg).unwrap();
-                        self.seq_handle.drain_output();
-                    }
+                    let msg = Message::RPN7(Ch1, 4, cc_math::button_cc_value(is_down));
+                    self.seq_port.send_message(&msg).unwrap();
+                    self.seq_handle.drain_output();
                 }
                 "step_left" => {
-                    if status > 0 {
-                        let msg = Message::RPN7(Ch1, 5, status as u8);
-                        self.seq_port.send_message(&msg).unwrap();
-                        self.seq_handle.drain_output();
-                    }
+                    let msg = Message::RPN7(Ch1, 5, cc_math::button_cc_value(is_down));
+                    self.seq_port.send_message(&msg).unwrap();
+                    self.seq_handle.drain_output();
                 }
                 "step_right" => {
-                    if status > 0 {
-                        let msg = Message::RPN7(Ch1, 6, status as u8);
-                        self.seq_port.send_message(&msg).unwrap();
-                        self.seq_handle.drain_output();
-                    }
+                    let msg = Message::RPN7(Ch1, 6, cc_math::button_cc_value(is_down));
+                    self.seq_port.send_message(&msg).unwrap();
+                    self.seq_handle.drain_output();
                 }
                 "restart" => {
-                    if status > 0 {
-                        let msg = Message::RPN7(Ch1, 7, status as u8);
-                        self.seq_port.send_message(&msg).unwrap();
-                        self.seq_handle.drain_output();
-                    }
+                    let msg = Message::RPN7(Ch1, 7, cc_math::button_cc_value(is_down));
+                    self.seq_port.send_message(&msg).unwrap();
+                    self.seq_handle.drain_output();
                 }
                 "browse" => {
-                    if status > 0 {
-                        let msg = Message::RPN7(Ch1, 8, status as u8);
-                        self.seq_port.send_message(&msg).unwrap();
-                        self.seq_handle.drain_output();
-                    }
+                    let msg = Message::RPN7(Ch1, 8, cc_math::button_cc_value(is_down));
+                    self.seq_port.send_message(&msg).unwrap();
+                    self.seq_handle.drain_output();
                 }
                 "sampling" => {
-                    if status > 0 {
-                        let msg = Message::RPN7(Ch1, 9, status as u8);
-                        self.seq_port.send_message(&msg).unwrap();
-                        self.seq_handle.drain_output();
-                    }
+                    let msg = Message::RPN7(Ch1, 9, cc_math::button_cc_value(is_down));
+                    self.seq_port.send_message(&msg).unwrap();
+                    self.seq_handle.drain_output();
                 }
                 "note_repeat" => {
-                    if status > 0 {
-                        let msg = Message::RPN7(Ch1, 10, status as u8);
-                        self.seq_port.send_message(&msg).unwrap();
-                        self.seq_handle.drain_output();
-                    }
+                    let msg = Message::RPN7(Ch1, 10, cc_math::button_cc_value(is_down));
+                    self.seq_port.send_message(&msg).unwrap();
+                    self.seq_handle.drain_output();
                 }
                 "control" => {
-                    if status > 0 {
-                        let msg = Message::RPN7(Ch1, 11, status as u8);
-                        self.seq_port.send_message(&msg).unwrap();
-                        self.seq_handle.drain_output();
-                    }
+                    let msg = Message::RPN7(Ch1, 11, cc_math::button_cc_value(is_down));
+                    self.seq_port.send_message(&msg).unwrap();
+                    self.seq_handle.drain_output();
                 }
                 "nav" => {
-                    if status > 0 {
-                        let msg = Message::RPN7(Ch1, 12, status as u8);
-                        self.seq_port.send_message(&msg).unwrap();
-                        self.seq_handle.drain_output();
-                    }
+                    let msg = Message::RPN7(Ch1, 12, cc_math::button_cc_value(is_down));
+                    self.seq_port.send_message(&msg).unwrap();
+                    self.seq_handle.drain_output();
                 }
                 "nav_left" => {
-                    if status > 0 {
-                        let msg = Message::RPN7(Ch1, 13, status as u8);
-                        self.seq_port.send_message(&msg).unwrap();
-                        self.seq_handle.drain_output();
-                    }
+                    let msg = Message::RPN7(Ch1, 13, cc_math::button_cc_value(is_down));
+                    self.seq_port.send_message(&msg).unwrap();
+                    self.seq_handle.drain_output();
                 }
                 "nav_right" => {
-                    if status > 0 {
-                        let msg = Message::RPN7(Ch1, 14, status as u8);
-                        self.seq_port.send_message(&msg).unwrap();
-                        self.seq_handle.drain_output();
-                    }
+                    let msg = Message::RPN7(Ch1, 14, cc_math::button_cc_value(is_down));
+                    self.seq_port.send_message(&msg).unwrap();
+                    self.seq_handle.drain_output();
                 }
                 "main" => {
-                    if status > 0 {
-                        let msg = Message::RPN7(Ch1, 24, status as u8);
-                        self.seq_port.send_message(&msg).unwrap();
-                        self.seq_handle.drain_output();
-                    }
+                    let msg = Message::RPN7(Ch1, 24, cc_math::button_cc_value(is_down));
+                    self.seq_port.send_message(&msg).unwrap();
+                    self.seq_handle.drain_output();
                 }
                 "scene" => {
-                    if status > 0 {
-                        let msg = Message::RPN7(Ch1, 25, status as u8);
-                        self.seq_port.send_message(&msg).unwrap();
-                        self.seq_handle.drain_output();
-                    }
+                    let msg = Message::RPN7(Ch1, 25, cc_math::button_cc_value(is_down));
+                    self.seq_port.send_message(&msg).unwrap();
+                    self.seq_handle.drain_output();
                 }
                 "pattern" => {
-                    if status > 0 {
-                        let msg = Message::RPN7(Ch1, 26, status as u8);
-                        self.seq_port.send_message(&msg).unwrap();
-                        self.seq_handle.drain_output();
-                    }
+                    let msg = Message::RPN7(Ch1, 26, cc_math::button_cc_value(is_down));
+                    self.seq_port.send_message(&msg).unwrap();
+                    self.seq_handle.drain_output();
                 }
                 "pad_mode" => {
                     if modpress == 1 {
-                        maschine.set_padmode(1);
+                        if is_down { maschine.set_padmode(1); }
                     } else {
-                        if status > 0 {
-                            let msg = Message::RPN7(Ch1, 27, status as u8);
-                            self.seq_port.send_message(&msg).unwrap();
-                            self.seq_handle.drain_output();
-                        }
+                        let msg = Message::RPN7(Ch1, 27, cc_math::button_cc_value(is_down));
+                        self.seq_port.send_message(&msg).unwrap();
+                        self.seq_handle.drain_output();
                     }
                 }
                 "view" => {
-                    if status > 0 {
-                        let msg = Message::RPN7(Ch1, 28, status as u8);
-                        self.seq_port.send_message(&msg).unwrap();
-                        self.seq_handle.drain_output();
-                    }
+                    let msg = Message::RPN7(Ch1, 28, cc_math::button_cc_value(is_down));
+                    self.seq_port.send_message(&msg).unwrap();
+                    self.seq_handle.drain_output();
                 }
                 "duplicate" => {
-                    if status > 0 {
-                        let msg = Message::RPN7(Ch1, 29, status as u8);
-                        self.seq_port.send_message(&msg).unwrap();
-                        self.seq_handle.drain_output();
-                    }
+                    let msg = Message::RPN7(Ch1, 29, cc_math::button_cc_value(is_down));
+                    self.seq_port.send_message(&msg).unwrap();
+                    self.seq_handle.drain_output();
                 }
                 "select" => {
-                    if status > 0 {
-                        let msg = Message::RPN7(Ch1, 30, status as u8);
-                        self.seq_port.send_message(&msg).unwrap();
-                        self.seq_handle.drain_output();
-                    }
+                    let msg = Message::RPN7(Ch1, 30, cc_math::button_cc_value(is_down));
+                    self.seq_port.send_message(&msg).unwrap();
+                    self.seq_handle.drain_output();
                 }
                 "solo" => {
-                    if status > 0 {
-                        let msg = Message::RPN7(Ch1, 31, status as u8);
-                        self.seq_port.send_message(&msg).unwrap();
-                        self.seq_handle.drain_output();
-                    }
+                    let msg = Message::RPN7(Ch1, 31, cc_math::button_cc_value(is_down));
+                    self.seq_port.send_message(&msg).unwrap();
+                    self.seq_handle.drain_output();
                 }
                 "step" => {
-                    if status > 0 {
-                        let msg = Message::RPN7(Ch1, 32, status as u8);
-                        self.seq_port.send_message(&msg).unwrap();
-                        self.seq_handle.drain_output();
-                    }
+                    let msg = Message::RPN7(Ch1, 32, cc_math::button_cc_value(is_down));
+                    self.seq_port.send_message(&msg).unwrap();
+                    self.seq_handle.drain_output();
                 }
                 "mute" => {
-                    if status > 0 {
-                        let msg = Message::RPN7(Ch1, 33, status as u8);
-                        self.seq_port.send_message(&msg).unwrap();
-                        self.seq_handle.drain_output();
-                    }
+                    let msg = Message::RPN7(Ch1, 33, cc_math::button_cc_value(is_down));
+                    self.seq_port.send_message(&msg).unwrap();
+                    self.seq_handle.drain_output();
                 }
                 "navigate" => {
-                    if status > 0 {
-                        let msg = Message::RPN7(Ch1, 34, status as u8);
-                        self.seq_port.send_message(&msg).unwrap();
-                        self.seq_handle.drain_output();
-                    }
+                    let msg = Message::RPN7(Ch1, 34, cc_math::button_cc_value(is_down));
+                    self.seq_port.send_message(&msg).unwrap();
+                    self.seq_handle.drain_output();
                 }
                 "tempo" => {
-                    if status > 0 {
-                        let msg = Message::RPN7(Ch1, 35, status as u8);
-                        self.seq_port.send_message(&msg).unwrap();
-                        self.seq_handle.drain_output();
-                    }
+                    let msg = Message::RPN7(Ch1, 35, cc_math::button_cc_value(is_down));
+                    self.seq_port.send_message(&msg).unwrap();
+                    self.seq_handle.drain_output();
                 }
                 "enter" => {
-                    if status > 0 {
-                        let msg = Message::RPN7(Ch1, 36, status as u8);
-                        self.seq_port.send_message(&msg).unwrap();
-                        self.seq_handle.drain_output();
-                    }
+                    let msg = Message::RPN7(Ch1, 36, cc_math::button_cc_value(is_down));
+                    self.seq_port.send_message(&msg).unwrap();
+                    self.seq_handle.drain_output();
                 }
                 "auto" => {
-                    if status > 0 {
-                        let msg = Message::RPN7(Ch1, 37, status as u8);
-                        self.seq_port.send_message(&msg).unwrap();
-                        self.seq_handle.drain_output();
-                    }
+                    let msg = Message::RPN7(Ch1, 37, cc_math::button_cc_value(is_down));
+                    self.seq_port.send_message(&msg).unwrap();
+                    self.seq_handle.drain_output();
                 }
                 "all" => {
-                    if status > 0 {
-                        let msg = Message::RPN7(Ch1, 38, status as u8);
-                        self.seq_port.send_message(&msg).unwrap();
-                        self.seq_handle.drain_output();
-                    }
+                    let msg = Message::RPN7(Ch1, 38, cc_math::button_cc_value(is_down));
+                    self.seq_port.send_message(&msg).unwrap();
+                    self.seq_handle.drain_output();
                 }
                 "f1" => {
-                    if status > 0 {
-                        let msg = Message::RPN7(Ch1, 39, status as u8);
-                        self.seq_port.send_message(&msg).unwrap();
-                        self.seq_handle.drain_output();
-                    }
+                    let msg = Message::RPN7(Ch1, 39, cc_math::button_cc_value(is_down));
+                    self.seq_port.send_message(&msg).unwrap();
+                    self.seq_handle.drain_output();
                 }
                 "f2" => {
-                    if status > 0 {
-                        let msg = Message::RPN7(Ch1, 40, status as u8);
-                        self.seq_port.send_message(&msg).unwrap();
-                        self.seq_handle.drain_output();
-                    }
+                    let msg = Message::RPN7(Ch1, 40, cc_math::button_cc_value(is_down));
+                    self.seq_port.send_message(&msg).unwrap();
+                    self.seq_handle.drain_output();
                 }
                 "f3" => {
-                    if status > 0 {
-                        let msg = Message::RPN7(Ch1, 41, status as u8);
-                        self.seq_port.send_message(&msg).unwrap();
-                        self.seq_handle.drain_output();
-                    }
+                    let msg = Message::RPN7(Ch1, 41, cc_math::button_cc_value(is_down));
+                    self.seq_port.send_message(&msg).unwrap();
+                    self.seq_handle.drain_output();
                 }
                 "f4" => {
-                    if status > 0 {
-                        let msg = Message::RPN7(Ch1, 42, status as u8);
-                        self.seq_port.send_message(&msg).unwrap();
-                        self.seq_handle.drain_output();
-                    }
+                    let msg = Message::RPN7(Ch1, 42, cc_math::button_cc_value(is_down));
+                    self.seq_port.send_message(&msg).unwrap();
+                    self.seq_handle.drain_output();
                 }
                 "f5" => {
-                    if status > 0 {
-                        let msg = Message::RPN7(Ch1, 43, status as u8);
-                        self.seq_port.send_message(&msg).unwrap();
-                        self.seq_handle.drain_output();
-                    }
+                    let msg = Message::RPN7(Ch1, 43, cc_math::button_cc_value(is_down));
+                    self.seq_port.send_message(&msg).unwrap();
+                    self.seq_handle.drain_output();
                 }
                 "f6" => {
-                    if status > 0 {
-                        let msg = Message::RPN7(Ch1, 44, status as u8);
-                        self.seq_port.send_message(&msg).unwrap();
-                        self.seq_handle.drain_output();
-                    }
+                    let msg = Message::RPN7(Ch1, 44, cc_math::button_cc_value(is_down));
+                    self.seq_port.send_message(&msg).unwrap();
+                    self.seq_handle.drain_output();
                 }
                 "f7" => {
-                    if status > 0 {
-                        let msg = Message::RPN7(Ch1, 45, status as u8);
-                        self.seq_port.send_message(&msg).unwrap();
-                        self.seq_handle.drain_output();
-                    }
+                    let msg = Message::RPN7(Ch1, 45, cc_math::button_cc_value(is_down));
+                    self.seq_port.send_message(&msg).unwrap();
+                    self.seq_handle.drain_output();
                 }
                 "f8" => {
-                    if status > 0 {
-                        let msg = Message::RPN7(Ch1, 46, status as u8);
-                        self.seq_port.send_message(&msg).unwrap();
-                        self.seq_handle.drain_output();
-                    }
+                    let msg = Message::RPN7(Ch1, 46, cc_math::button_cc_value(is_down));
+                    self.seq_port.send_message(&msg).unwrap();
+                    self.seq_handle.drain_output();
                 }
                 "page_right" => {
-                    if status > 0 {
-                        let msg = Message::RPN7(Ch1, 47, status as u8);
-                        self.seq_port.send_message(&msg).unwrap();
-                        self.seq_handle.drain_output();
-                    }
+                    let msg = Message::RPN7(Ch1, 47, cc_math::button_cc_value(is_down));
+                    self.seq_port.send_message(&msg).unwrap();
+                    self.seq_handle.drain_output();
                 }
                 "page_left" => {
-                    if status > 0 {
-                        let msg = Message::RPN7(Ch1, 48, status as u8);
-                        self.seq_port.send_message(&msg).unwrap();
-                        self.seq_handle.drain_output();
-                    }
+                    let msg = Message::RPN7(Ch1, 48, cc_math::button_cc_value(is_down));
+                    self.seq_port.send_message(&msg).unwrap();
+                    self.seq_handle.drain_output();
                 }
 
                 "B6" => {
                     let idx = 1;
                     let state = maschine.get_roller_state(idx);
-                    let status = status / 4 + state * 64;
+                    let accumulated = status as i32 / 4 + state as i32 * 64;
                     if modpress != 1 {
-                        let msg = Message::RPN14(Ch1, controlbase + 1, status as u16 / 2);
+                        let value = accumulated.clamp(0, 127) as u8;
+                        let msg = Message::RPN7(Ch1, controlbase + 1, value);
                         self.seq_port.send_message(&msg).unwrap();
                         self.seq_handle.drain_output();
                     } else {
-                        maschine.set_seq_speed(status);
+                        maschine.set_seq_speed(accumulated as usize);
                     }
                 }
                 "D6" => {
                     let idx = 2;
                     let state = maschine.get_roller_state(idx);
-                    let status = status / 4 + state * 64;
-                    let msg = Message::RPN14(Ch1, controlbase + 2, status as u16 / 2);
+                    let accumulated = status as i32 / 4 + state as i32 * 64;
+                    let value = accumulated.clamp(0, 127) as u8;
+                    let msg = Message::RPN7(Ch1, controlbase + 2, value);
                     self.seq_port.send_message(&msg).unwrap();
                     self.seq_handle.drain_output();
                 }
                 "FF6" => {
                     let idx = 3;
                     let state = maschine.get_roller_state(idx);
-                    let status = status / 4 + state * 64;
-                    let msg = Message::RPN14(Ch1, controlbase + 3, status as u16 / 2);
+                    let accumulated = status as i32 / 4 + state as i32 * 64;
+                    let value = accumulated.clamp(0, 127) as u8;
+                    let msg = Message::RPN7(Ch1, controlbase + 3, value);
                     self.seq_port.send_message(&msg).unwrap();
                     self.seq_handle.drain_output();
                 }
                 "H6" => {
                     let idx = 4;
                     let state = maschine.get_roller_state(idx);
-                    let status = status / 4 + state * 64;
-                    let msg = Message::RPN14(Ch1, controlbase + 4, status as u16 / 2);
+                    let accumulated = status as i32 / 4 + state as i32 * 64;
+                    let value = accumulated.clamp(0, 127) as u8;
+                    let msg = Message::RPN7(Ch1, controlbase + 4, value);
                     self.seq_port.send_message(&msg).unwrap();
                     self.seq_handle.drain_output();
                 }
                 "J6" => {
                     let idx = 5;
                     let state = maschine.get_roller_state(idx);
-                    let status = status / 4 + state * 64;
-                    let msg = Message::RPN14(Ch1, controlbase + 5, status as u16 / 2);
+                    let accumulated = status as i32 / 4 + state as i32 * 64;
+                    let value = accumulated.clamp(0, 127) as u8;
+                    let msg = Message::RPN7(Ch1, controlbase + 5, value);
                     self.seq_port.send_message(&msg).unwrap();
                     self.seq_handle.drain_output();
                 }
                 "L6" => {
                     let idx = 6;
                     let state = maschine.get_roller_state(idx);
-                    let status = status / 4 + state * 64;
-                    let msg = Message::RPN14(Ch1, controlbase + 6, status as u16 / 2);
+                    let accumulated = status as i32 / 4 + state as i32 * 64;
+                    let value = accumulated.clamp(0, 127) as u8;
+                    let msg = Message::RPN7(Ch1, controlbase + 6, value);
                     self.seq_port.send_message(&msg).unwrap();
                     self.seq_handle.drain_output();
                 }
                 "N6" => {
                     let idx = 7;
                     let state = maschine.get_roller_state(idx);
-                    let status = status / 4 + state * 64;
-                    let msg = Message::RPN14(Ch1, controlbase + 7, status as u16 / 2);
+                    let accumulated = status as i32 / 4 + state as i32 * 64;
+                    let value = accumulated.clamp(0, 127) as u8;
+                    let msg = Message::RPN7(Ch1, controlbase + 7, value);
                     self.seq_port.send_message(&msg).unwrap();
                     self.seq_handle.drain_output();
                 }
                 "P6" => {
-                    let msg = Message::RPN14(Ch1, controlbase + 8, status as u16 / 2);
+                    let value = (status as i32).clamp(0, 127) as u8;
+                    let msg = Message::RPN7(Ch1, controlbase + 8, value);
                     self.seq_port.send_message(&msg).unwrap();
                     self.seq_handle.drain_output();
                 }
@@ -1004,26 +1032,33 @@ impl<'a> MHandler<'a> {
                 _ => {}
             }
         }
+        if is_down {
+            let _ = self.event_tx.send(DeviceEvent::ButtonDown { button: button.to_string() });
+        } else {
+            let _ = self.event_tx.send(DeviceEvent::ButtonUp { button: button.to_string() });
+        }
         self.send_osc_msg(&*format!("/{}", button), osc_args![status as f32]);
     }
 
-    fn send_osc_encoder_msg(&self, maschine: &mut dyn Maschine, idx: usize,  status: i32) {
+    fn send_encoder_cc(&self, maschine: &mut dyn Maschine, idx: usize, raw: i32) {
         let state = maschine.get_roller_state(idx);
-        let status = status / 4 + state as i32 * 64 ;
-        if status - maschine.get_roller_status(idx) < 40 && maschine.get_roller_status(idx) - status < 40{
-            let msg = Message::RPN14(Ch1, idx as u16 + 16, status as u16);
-            maschine.set_roller_status(status, idx);
+        let accumulated = raw / 4 + state as i32 * 64;
+        let prev = maschine.get_roller_status(idx);
+        if (accumulated - prev).abs() < 40 {
+            let value = accumulated.clamp(0, 127) as u8;
+            let cc_num = self.encoder_ccs[idx];
+            let msg = Message::RPN7(Ch1, cc_num, value);
+            maschine.set_roller_status(accumulated, idx);
             self.seq_port.send_message(&msg).unwrap();
             self.seq_handle.drain_output();
+            let _ = self.event_tx.send(DeviceEvent::Encoder { idx, value });
         }
     }
 }
 
-const PAD_NOTE_MAP: [U7; 16] = [12, 13, 14, 15, 8, 9, 10, 11, 4, 5, 6, 7, 0, 1, 2, 3];
-
 impl<'a> MaschineHandler for MHandler<'a> {
     fn pad_pressed(&mut self, maschine: &mut dyn Maschine, pad_idx: usize, pressure: f32) {
-        let midi_note = maschine.get_midi_note_base() + PAD_NOTE_MAP[pad_idx];
+        let midi_note = maschine.get_midi_note_base() + self.pad_notes[pad_idx];
         let msg = Message::NoteOn(Ch1, midi_note, self.pressure_to_vel(pressure));
         if maschine.get_padmode() == 2 {
             if maschine.get_mod() != 1 {
@@ -1041,6 +1076,10 @@ impl<'a> MaschineHandler for MHandler<'a> {
             self.seq_port.send_message(&msg).unwrap();
             self.seq_handle.drain_output();
             maschine.set_pad_light(pad_idx, self.pad_color(), pressure.sqrt());
+            let _ = self.event_tx.send(DeviceEvent::PadPressed {
+                pad: pad_idx,
+                velocity: self.pressure_to_vel(pressure),
+            });
         };
     }
 
@@ -1054,7 +1093,7 @@ impl<'a> MaschineHandler for MHandler<'a> {
             return;
         }
 
-        let midi_note = maschine.get_midi_note_base() + PAD_NOTE_MAP[pad_idx];
+        let midi_note = maschine.get_midi_note_base() + self.pad_notes[pad_idx];
         let msg = Message::PolyphonicPressure(Ch1, midi_note, self.pressure_to_vel(pressure));
 
         self.seq_port.send_message(&msg).unwrap();
@@ -1065,16 +1104,17 @@ impl<'a> MaschineHandler for MHandler<'a> {
 
     fn pad_released(&mut self, maschine: &mut dyn Maschine, pad_idx: usize) {
         if maschine.get_padmode() != 2 {
-            let midi_note = maschine.get_midi_note_base() + PAD_NOTE_MAP[pad_idx];
+            let midi_note = maschine.get_midi_note_base() + self.pad_notes[pad_idx];
             let msg = Message::NoteOff(Ch1, midi_note, 0);
             self.seq_port.send_message(&msg).unwrap();
             self.seq_handle.drain_output();
             maschine.set_pad_light(pad_idx, self.pad_color(), PAD_RELEASED_BRIGHTNESS);
+            let _ = self.event_tx.send(DeviceEvent::PadReleased { pad: pad_idx });
         };
     }
 
     fn encoder_step(&mut self, maschine: &mut dyn Maschine, idx: usize, state: i32) {
-        self.send_osc_encoder_msg(maschine, idx, state);
+        self.send_encoder_cc(maschine, idx, state);
     }
 
     fn button_down(
@@ -1097,6 +1137,13 @@ impl<'a> MaschineHandler for MHandler<'a> {
     ) {
         self.send_osc_button_msg(maschine, btn, byte as usize, is_down);
     }
+
+    fn midi_in_received(&mut self, _maschine: &mut dyn Maschine, bytes: &[u8]) {
+        for msg in midi_parse::parse(bytes) {
+            let _ = self.seq_port.send_message(&msg);
+        }
+        self.seq_handle.drain_output();
+    }
 }
 
 fn main() {
@@ -1116,9 +1163,24 @@ fn main() {
         Ok(file) => file,
     };
 
-    let osc_socket = UdpSocket::bind("127.0.0.1:42434").unwrap();
+    let osc_socket = match UdpSocket::bind("127.0.0.1:42434") {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("error: failed to bind OSC socket on port 42434: {}", e);
+            eprintln!("hint: is another maschine daemon already running?");
+            std::process::exit(1);
+        }
+    };
 
-    let seq_handle = SequencerHandle::open("maschine.rs", HandleOpenStreams::Output).unwrap();
+    let (event_tx, event_rx) = mpsc::channel::<DeviceEvent>();
+    let (cmd_tx, cmd_rx) = mpsc::channel::<WsCommand>();
+    ws_server::start(cmd_tx, event_rx);
+
+    let seq_handle = SequencerHandle::open("maschine.rs", HandleOpenStreams::Duplex)
+        .unwrap_or_else(|_| {
+            eprintln!("warning: ALSA not available — MIDI disabled");
+            SequencerHandle::null()
+        });
     let seq_port = seq_handle
         .create_port(
             "Pads MIDI",
@@ -1126,6 +1188,17 @@ fn main() {
             PortType::MidiGeneric,
         )
         .unwrap();
+    let _seq_in_port = seq_handle
+        .create_port(
+            "MIDI Control",
+            PortCapabilities::PORT_CAPABILITY_WRITE | PortCapabilities::PORT_CAPABILITY_SUBS_WRITE,
+            PortType::MidiGeneric,
+        )
+        .unwrap();
+    seq_handle.set_nonblock();
+    let seq_in_fd = seq_handle.get_poll_fd();
+
+    let cfg = MaschineConfig::load();
 
     let mut dev = devices::mk2::Mikro::new(dev_fd);
 
@@ -1144,17 +1217,18 @@ fn main() {
 
         osc_socket: &osc_socket,
         osc_outgoing_addr: SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 42435)),
+
+        event_tx,
+        cmd_rx,
+
+        seq_in_fd,
+
+        pad_notes: cfg.pad_notes,
+        encoder_ccs: cfg.encoder_ccs,
     };
 
     dev.clear_screen();
 
-    //Trying to draw stuff here
-    if args.len() < 3 {
-        dev.write_screen();
-    } else {
-        println!("RUNNING!")
-    }
-    //println!("{}", std::env::current_dir().unwrap().display());
     for i in 0..16 {
         dev.set_pad_light(i, handler.pad_color(), PAD_RELEASED_BRIGHTNESS);
     }

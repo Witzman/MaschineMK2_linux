@@ -1,82 +1,158 @@
 # MaschineMK2_linux
-**MaschineMK2_linux is an open-source program that allows you to (possibly) use your Maschine MK2 device on linux**
 
-Works on atleast ubuntu and fedora, but most distros should work.
-Use pipewire and pipewire-jack or whatever.
+User-space Linux driver for the Native Instruments Maschine MK2 USB controller. Exposes pads, buttons, encoders, and the physical MIDI DIN IN jack as ALSA MIDI, with a browser-based LED/config editor and 128×64 display support.
 
-Forked from https://github.com/wrl/maschine.rs
-Without the maschine.rs project I would not have a working MIDI controller right now!
+Forked from [wrl/maschine.rs](https://github.com/wrl/maschine.rs).
 
+---
 
-# Features
-- Functional midi pads
-- Buttons as midi cc so you can map them into a DAW or something
-- Encoders as midi cc (not quite 100% functional)
-- Lights
-- Picture on the screen
-- The same OSC idea from the original maschine.rs
+## Features
 
-**ABSOLUTELY TESTING** sequencer mode:
-- press Shift+Padmode twice to activate.
-- Press pads to activate them for the sequence, they light up when active.
-- ~~- Shift+Small roller 1 controls the speed of the sequencer~~ **Under construction**
-- Holding shift and tapping a pad, then tapping another pad changes the note of the first pad.
-- While in sequencer mode, the play button starts the sequencer.
+### MIDI Output
+- **Pads** → ALSA MIDI Note On/Off (velocity-sensitive); note = `note_base + pad_offset`
+- **Buttons** → CC messages (mappable in any DAW)
+- **Encoders** → CC messages (CC numbers configurable per-encoder, default 17–24)
+- **Group buttons A–H** → change MIDI note base (C2–C9)
 
-# Building
-to build MaschineMK2_linux you will need rustc and cargo.
-to install rust, go to: https://www.rust-lang.org/tools/install
+### MIDI Input
+- **ALSA writable port `MIDI Control`** — connect any MIDI source; Note On/Off notes 0–15 control pad RGB LEDs; Clock/Start/Stop forwarded to output
+- **Physical DIN MIDI IN jack** — clock and note data forwarded to the `Pads MIDI` output port for sync
 
-build:
-``` sh
-git clone https://github.com/SnovaxZ/MaschineMK2_linux.git
-cd MaschineMK2_linux
-./build.sh
+### Web Editor
+Local browser interface at `web/index.html`. Connect via WebSocket (`ws://127.0.0.1:9001`). Features:
+- Set pad LED colors and brightness
+- Control button LEDs
+- Set MIDI note base
+- **Config sidebar**: per-pad note offsets (editable), per-encoder CC numbers (editable), preset layouts (Default / Chromatic / Minor Pentatonic)
+- Live event stream: pad presses, encoder movements, button state
+
+### Config Persistence
+Settings saved to `maschine.json` in the working directory. Loaded on startup. Editing via web editor writes through immediately.
+
+```json
+{
+  "pad_notes": [12,13,14,15,8,9,10,11,4,5,6,7,0,1,2,3],
+  "encoder_ccs": [17,18,19,20,21,22,23,24]
+}
 ```
 
-the *build.sh* just runs cargo build and moves the test picture into the release directory.
+`pad_notes` — per-pad offset added to the current note base (0–127 each).  
+`encoder_ccs` — CC number sent by each encoder (0–127 each).
 
-*if you can not run the build program you might need to make sure it is executable*
+### Display
+128×64 monochrome OLED. Renders pad note names and encoder CC values using a built-in 5×8 bitmap font.
 
-**Other stuff You probably need:**
-Pipewire also works
- - Alsa   *On some distros you may need the alsa-lib-devel package or similar*
- - Jack
- - Patchance, Qjackctl or any similar program.
- 
+### Sequencer Mode (experimental)
+- Activate: **Shift + Pad Mode** twice
+- Press pads to toggle steps on/off (lit = active)
+- **Shift + tap pad A → tap pad B** changes pad A's note to pad B's note
+- **Play** starts the sequencer
 
-# Use
-First: figure out which hidraw path your maschine uses. (*The run.sh does this for you now!*)
+---
 
-Second (optional): change the udev rules so you can run without sudo.
+## Requirements
 
-Third: You can just run the *run.sh* in your terminal (sudo if needed).
-`sudo ./run.sh`
+- Rust (install via [rustup](https://www.rust-lang.org/tools/install))
+- ALSA development headers (`libasound2-dev` on Debian/Ubuntu, `alsa-lib-devel` on Fedora/RHEL)
+- `pkg-config`
+- PipeWire, PipeWire-JACK, or JACK
 
-*if you can not run the build program you might need to make sure it is executable*
+Connect ALSA ports using `aconnect`, Patchance, Qjackctl, or similar.
 
-You can also run it 
-- with cargo `cargo run --release`
-- directly from the release directory `./maschine /dev/hidrawX` X is the number for your hidraw location.
-- Without the picture on screen (in release directory) `./maschine /dev/hidrawX no`
+---
 
+## Building
 
+```sh
+git clone https://github.com/Witzman/MaschineMK2_linux.git
+cd MaschineMK2_linux
+cargo build --release
+```
 
-Fourth (optional): I have included a shellscript to turn on all the lights at once.
-It's a bit inconvenient but:
- - With the program open in a terminal, open a new terminal `cd MaschineMK2_linux` and `./insert_colors.sh`
+---
 
-*Info*
+## Running
 
-- Group buttons change the midi note base.
-- Most other buttons can be mapped in Reaper (I don't know about other DAW's).
-- Encoders are currently absolute 360 degrees, but they stop at 98% (-ish).
+### Find your hidraw device
 
-# future todos:
+```sh
+for f in /dev/hidraw*; do
+  echo "$f: $(cat /sys/class/hidraw/${f##*/}/device/uevent | grep HID_NAME | cut -d= -f2)"
+done
+```
 
-- Remove OSC (I still depend on it to turn the lights on)
-- Make the midi statement for buttons better
-- add padmodes for different CC configurations
-- maybe a personal config file?
-- fix encoder jankyness
-- screens?
+Or use the interactive helper:
+
+```sh
+./run.sh
+```
+
+### udev rule (run without sudo)
+
+Create `/etc/udev/rules.d/70-maschine.rules`:
+
+```
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="17cc", ATTRS{idProduct}=="1200", MODE="0666"
+```
+
+Then: `sudo udevadm control --reload-rules && sudo udevadm trigger`
+
+### Start the daemon
+
+```sh
+./target/release/maschine /dev/hidrawX
+```
+
+Replace `X` with the number for your Maschine MK2.
+
+### Open the web editor
+
+Open `web/index.html` in a browser. Connects to `ws://127.0.0.1:9001` automatically and loads current config on connect.
+
+---
+
+## ALSA Ports
+
+After starting, two ALSA sequencer ports appear:
+
+```
+client N: 'maschine.rs'
+    0 'Pads MIDI   '   ← output: pad notes, button CC, encoder CC, forwarded DIN MIDI IN
+    1 'MIDI Control'   ← input:  NoteOn/Off 0-15 → pad LEDs; Clock/Start/Stop → forwarded out
+```
+
+Check with `aconnect -l`. Connect with `aconnect <source> N:1` to drive LEDs from a DAW or sequencer.
+
+---
+
+## MIDI Mapping
+
+| Source | Type | Default CC / Note | Notes |
+|--------|------|-------------------|-------|
+| Pads | Note On/Off | `note_base + pad_notes[i]` | Velocity-sensitive; offsets configurable |
+| Group A–H | — | — | Sets note base to C2–C9 (MIDI 24–108) |
+| Transport buttons (Play, Stop, Rec, …) | CC 1–14 | — | Value 127 = down, 0 = up |
+| Encoders 1–8 | CC | 17–24 | Absolute 0–127; CC numbers configurable per-encoder |
+| A8 knob | CC 15 | — | Absolute |
+
+### Pad note offsets
+
+Default layout maps pad hardware indices to offsets `[12,13,14,15,8,9,10,11,4,5,6,7,0,1,2,3]` (bottom-left pad = offset 0). With note base 48 (C3), bottom-left fires C3, top-right fires D#4.
+
+Change offsets via the web editor config panel or edit `maschine.json` directly.
+
+---
+
+## OSC (legacy)
+
+OSC listen port: `42434`. Send port: `42435`.
+
+Paths: `/maschine/button/<name>`, `/maschine/pad`, `/maschine/midi_note_base`.
+
+OSC is kept for compatibility; the web editor covers the same functionality.
+
+---
+
+## License
+
+LGPL-3.0. See [LICENSE](LICENSE).

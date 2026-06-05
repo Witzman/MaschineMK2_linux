@@ -281,6 +281,7 @@ pub trait Maschine {
     fn clear_screen(&mut self);
     fn write_lights(&mut self);
     fn write_screen(&mut self);
+    fn write_display(&mut self) {}
 }
 
 #[allow(unused_variables)]
@@ -294,5 +295,5 @@ pub trait MaschineHandler {
     fn button_down(&mut self, _: &mut dyn Maschine, button: MaschineButton, byte: u8, is_down: bool) {}
     fn button_up(&mut self, _: &mut dyn Maschine, button: MaschineButton, byte: u8, is_down: bool) {}
 
-    fn read_input(&mut self, _: &mut dyn Maschine) {}
+    fn midi_in_received(&mut self, _: &mut dyn Maschine, _bytes: &[u8]) {}
 }

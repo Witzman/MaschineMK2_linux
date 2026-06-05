@@ -56,5 +56,6 @@ pub use port::{
 };
 
 mod event;
+pub use event::SeqInputEvent;
 
 mod test;

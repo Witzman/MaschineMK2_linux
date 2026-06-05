@@ -182,3 +182,39 @@ impl ToSndSeqEvent for Message {
         Some(ev)
     }
 }
+
+#[derive(Debug)]
+pub enum SeqInputEvent {
+    NoteOn    { channel: u8, note: u8, velocity: u8 },
+    NoteOff   { channel: u8, note: u8, velocity: u8 },
+    Controller { channel: u8, param: u32, value: i32 },
+    Clock,
+    Start,
+    Stop,
+}
+
+impl SeqInputEvent {
+    pub fn from_raw(ev: *mut snd_seq_event_t) -> Option<SeqInputEvent> {
+        unsafe {
+            let ev = &mut *ev;
+            match ev._type as u32 {
+                t if t == SND_SEQ_EVENT_NOTEON => {
+                    let n = &*ev.data.note();
+                    Some(SeqInputEvent::NoteOn { channel: n.channel, note: n.note, velocity: n.velocity })
+                }
+                t if t == SND_SEQ_EVENT_NOTEOFF => {
+                    let n = &*ev.data.note();
+                    Some(SeqInputEvent::NoteOff { channel: n.channel, note: n.note, velocity: n.velocity })
+                }
+                t if t == SND_SEQ_EVENT_CONTROLLER => {
+                    let c = &*ev.data.control();
+                    Some(SeqInputEvent::Controller { channel: c.channel, param: c.param, value: c.value })
+                }
+                t if t == SND_SEQ_EVENT_CLOCK => Some(SeqInputEvent::Clock),
+                t if t == SND_SEQ_EVENT_START => Some(SeqInputEvent::Start),
+                t if t == SND_SEQ_EVENT_STOP  => Some(SeqInputEvent::Stop),
+                _ => None,
+            }
+        }
+    }
+}

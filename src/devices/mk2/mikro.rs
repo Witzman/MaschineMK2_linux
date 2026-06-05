@@ -26,9 +26,9 @@ use nix::unistd;
 extern crate hex;
 extern crate png;
 
-use base::{Maschine, MaschineButton, MaschineHandler, MaschinePad, MaschinePadStateTransition};
+use crate::base::{Maschine, MaschineButton, MaschineHandler, MaschinePad, MaschinePadStateTransition};
+use crate::display;
 
-use crate::base::maschine;
 
 const BUTTON_REPORT_TO_MIKROBUTTONS_MAP: [[Option<MaschineButton>; 8]; 24] = [
     [
@@ -420,6 +420,33 @@ impl Mikro {
             }
         }
     }
+
+    fn send_display_bits(&mut self, report_id: u8, bits: &[u8]) {
+        let mut screen_buf = [0u8; 1 + 8 + 512];
+        screen_buf[0] = report_id;
+        screen_buf[5] = 0x08;
+        screen_buf[7] = 0x20;
+        screen_buf[1] = 0;
+        screen_buf[3] = 0;
+
+        let mut col: u8 = 0;
+        let mut page: u8 = 0;
+        let mut steps: u8 = 0;
+
+        for &byte in bits {
+            screen_buf[1] = col;
+            screen_buf[3] = page;
+            screen_buf[9] = byte;
+            let _ = unistd::write(self.dev, &screen_buf);
+            col += 1;
+            steps += 1;
+            if steps > 30 {
+                steps = 0;
+                col = 0;
+                page += 1;
+            }
+        }
+    }
 }
 
 fn set_rgb_light(rgb: &mut [u8], color: u32, brightness: f32) {
@@ -436,9 +463,9 @@ impl Maschine for Mikro {
     }
 
     fn write_lights(&mut self) {
-        unistd::write(self.dev, &self.light_buf).unwrap();
-        unistd::write(self.dev, &self.light_buf2).unwrap();
-        unistd::write(self.dev, &self.light_buf3).unwrap();
+        let _ = unistd::write(self.dev, &self.light_buf);
+        let _ = unistd::write(self.dev, &self.light_buf2);
+        let _ = unistd::write(self.dev, &self.light_buf3);
     }
 
     fn set_pad_light(&mut self, pad: usize, color: u32, brightness: f32) {
@@ -634,6 +661,7 @@ impl Maschine for Mikro {
         match report_nr {
             0x01 => self.read_buttons(handler, &buf),
             0x20 => self.read_pads(handler, &buf),
+            0x03 => handler.midi_in_received(self, buf),
             _ => println!(" :: {:2X}: got {} bytes", report_nr, nbytes),
         }
     }
@@ -676,17 +704,21 @@ impl Maschine for Mikro {
                 }
                 t += 1;
             }
-            unistd::write(self.dev, &screen_buf).unwrap();
-            unistd::write(self.dev, &screen_buf2).unwrap();
+            let _ = unistd::write(self.dev, &screen_buf);
+            let _ = unistd::write(self.dev, &screen_buf2);
         }
 
         println!("Screen clear done?");
     }
 
     fn write_screen(&mut self) {
+        let png_path = "picturetest.png";
+        if !std::path::Path::new(png_path).exists() {
+            return;
+        }
         let mut limits = png::Limits::default();
         limits.bytes = 10 * 1024;
-        let decoder = png::Decoder::new_with_limits(File::open("picturetest.png").unwrap(), limits);
+        let decoder = png::Decoder::new_with_limits(File::open(png_path).unwrap(), limits);
         let mut reader = decoder.read_info().unwrap();
         let mut picture = vec![0; reader.output_buffer_size()];
         let info = reader.next_frame(&mut picture).unwrap();
@@ -787,9 +819,42 @@ impl Maschine for Mikro {
                 }
             }
             //println!("{}", bits[a]);
-            unistd::write(self.dev, &screen_buf).unwrap();
+            let _ = unistd::write(self.dev, &screen_buf);
             screen_writer += 1;
         }
         println!("RUNNING!");
+    }
+
+    fn write_display(&mut self) {
+        const SZ: usize = display::HEIGHT * display::STRIDE;
+
+        let note_names = ["C-1","C0","C1","C2","C3","C4","C5","C6","C7","C8","C9"];
+        let base = self.midi_note_base;
+        let note_name = note_names.get((base / 12) as usize).unwrap_or(&"?");
+
+        // Left display (0xE0): encoders 0-3
+        let mut left = [0u8; SZ];
+        display::draw_text(&mut left, 0, 0, " K1    K2    K3    K4");
+        let v0 = self.roller_status[0].clamp(0, 127);
+        let v1 = self.roller_status[1].clamp(0, 127);
+        let v2 = self.roller_status[2].clamp(0, 127);
+        let v3 = self.roller_status[3].clamp(0, 127);
+        let line1 = format!("{:>3}   {:>3}   {:>3}   {:>3}", v0, v1, v2, v3);
+        display::draw_text(&mut left, 0, 10, &line1);
+        let base_line = format!("BASE:{}{}", note_name, base);
+        display::draw_text(&mut left, 0, 20, &base_line);
+
+        // Right display (0xE1): encoders 4-7
+        let mut right = [0u8; SZ];
+        display::draw_text(&mut right, 0, 0, " K5    K6    K7    K8");
+        let v4 = self.roller_status[4].clamp(0, 127);
+        let v5 = self.roller_status[5].clamp(0, 127);
+        let v6 = self.roller_status[6].clamp(0, 127);
+        let v7 = self.roller_status[7].clamp(0, 127);
+        let line2 = format!("{:>3}   {:>3}   {:>3}   {:>3}", v4, v5, v6, v7);
+        display::draw_text(&mut right, 0, 10, &line2);
+
+        self.send_display_bits(0xE0, &left);
+        self.send_display_bits(0xE1, &right);
     }
 }

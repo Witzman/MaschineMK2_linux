@@ -21,6 +21,7 @@
 use std::ptr::null_mut;
 use std::ffi;
 
+use libc::{c_int, c_short, POLLIN};
 use alsa_sys::*;
 
 use {
@@ -31,6 +32,8 @@ use {
     PortCapabilities
 };
 
+use event::SeqInputEvent;
+
 #[repr(C)]
 pub enum HandleOpenStreams {
     Output = 1,
@@ -39,6 +42,14 @@ pub enum HandleOpenStreams {
 }
 
 impl SequencerHandle {
+    pub fn null() -> Self {
+        SequencerHandle { raw_handle: null_mut() }
+    }
+
+    pub fn is_available(&self) -> bool {
+        !self.raw_handle.is_null()
+    }
+
     pub fn open(name: &str, streams: HandleOpenStreams) -> Result<Self, Error> {
         let cstr = match ffi::CString::new(name) {
             Ok(cstr) => cstr,
@@ -65,8 +76,12 @@ impl SequencerHandle {
         }
     }
 
-    pub fn create_port(&self, name: &str, capabilities: PortCapabilities, port_type: PortType) 
-        -> Result<SequencerPort, Error> {
+    pub fn create_port(&self, name: &str, capabilities: PortCapabilities, port_type: PortType)
+        -> Result<SequencerPort<'_>, Error> {
+        if self.raw_handle.is_null() {
+            return Ok(SequencerPort { raw_handle: -1, handle: self });
+        }
+
         let cstr = match ffi::CString::new(name) {
             Ok(cstr) => cstr,
             Err(_) => return Err(Error::Unknown)
@@ -91,8 +106,35 @@ impl SequencerHandle {
     }
 
     pub fn drain_output(&self) {
+        if self.raw_handle.is_null() { return; }
         unsafe {
             snd_seq_drain_output(self.raw_handle);
+        }
+    }
+
+    pub fn set_nonblock(&self) {
+        if self.raw_handle.is_null() { return; }
+        unsafe { snd_seq_nonblock(self.raw_handle, 1); }
+    }
+
+    pub fn get_poll_fd(&self) -> c_int {
+        if self.raw_handle.is_null() { return -1; }
+        let mut pfd = libc::pollfd { fd: 0, events: POLLIN as c_short, revents: 0 };
+        unsafe {
+            snd_seq_poll_descriptors(self.raw_handle, &mut pfd, 1, POLLIN as c_short);
+        }
+        pfd.fd
+    }
+
+    pub fn try_receive_event(&self) -> Option<SeqInputEvent> {
+        if self.raw_handle.is_null() { return None; }
+        let mut ev_ptr: *mut snd_seq_event_t = null_mut();
+        unsafe {
+            let ret = snd_seq_event_input(self.raw_handle, &mut ev_ptr);
+            if ret < 0 || ev_ptr.is_null() {
+                return None;
+            }
+            SeqInputEvent::from_raw(ev_ptr)
         }
     }
 }

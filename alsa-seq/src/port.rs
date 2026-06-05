@@ -38,6 +38,7 @@ bitflags! {
         const PORT_CAPABILITY_DUPLEX = (1 << 4);
         const PORT_CAPABILITY_NO_EXPORT = (1 << 7);
         const PORT_CAPABILITY_READ = (1 << 0);
+        const PORT_CAPABILITY_WRITE = (1 << 1);
         const PORT_CAPABILITY_SUBS_READ = (1 << 5);
         const PORT_CAPABILITY_SUBS_WRITE = (1 << 6);
         const PORT_CAPABILITY_SYNC_READ = (1 << 2);
@@ -66,6 +67,7 @@ pub enum PortType {
 
 impl<'handle> SequencerPort<'handle> {
     pub fn send_message(&self, msg: &Message) -> Result<(), Error> {
+        if !self.handle.is_available() { return Ok(()); }
         let mut ev = match msg.to_snd_seq_event() {
             Some(ev) => ev,
             None => return Err(Error::Unknown)
