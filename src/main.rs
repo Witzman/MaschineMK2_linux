@@ -105,14 +105,24 @@ fn ev_loop(dev: &mut dyn Maschine, mhandler: &mut MHandler) {
                     SeqInputEvent::Clock => {
                         let _ = mhandler.seq_port.send_message(&Message::TimingClock);
                         mhandler.seq_handle.drain_output();
+                        if let Some(_fired_step) = dev.clock_tick() {
+                        }
+                        if let Some(bpm) = dev.get_clock_state().estimated_bpm() {
+                            let _ = mhandler.event_tx.send(DeviceEvent::ClockBpm { bpm });
+                        }
                     }
                     SeqInputEvent::Start => {
                         let _ = mhandler.seq_port.send_message(&Message::Start);
                         mhandler.seq_handle.drain_output();
+                        dev.clock_start();
+                        step = 0;
+                        check = 0;
+                        now2 = SystemTime::now();
                     }
                     SeqInputEvent::Stop => {
                         let _ = mhandler.seq_port.send_message(&Message::Stop);
                         mhandler.seq_handle.drain_output();
+                        dev.clock_stop();
                     }
                     _ => {}
                 }
@@ -170,25 +180,44 @@ fn ev_loop(dev: &mut dyn Maschine, mhandler: &mut MHandler) {
         if dev.get_playing() == true {
             timer_interval2 = Duration::from_millis(dev.get_seq_speed());
             active = true;
-            if dev.note_check(step) == 1 && now2.elapsed().unwrap() >= timer_interval2 && check == 0
+            let use_internal_clock = matches!(dev.get_clock_state().source, ClockSource::Internal);
+            if use_internal_clock && dev.note_check(step) == 1 && now2.elapsed().unwrap() >= timer_interval2 && check == 0
             {
                 let msg = dev.load_notes(step, 1);
                 mhandler.seq_port.send_message(&msg).unwrap();
                 mhandler.seq_handle.drain_output();
                 check = 1;
             };
-            if now2.elapsed().unwrap() >= timer_interval2 * 2 && dev.note_check(step) == 1 {
+            if use_internal_clock && now2.elapsed().unwrap() >= timer_interval2 * 2 && dev.note_check(step) == 1 {
                 let msg = dev.load_notes(step, 0);
                 mhandler.seq_port.send_message(&msg).unwrap();
                 mhandler.seq_handle.drain_output();
                 now2 = SystemTime::now();
                 step += 1;
                 check = 0;
-            } else if now2.elapsed().unwrap() >= timer_interval2 * 2 && dev.note_check(step) == 0 {
+            } else if use_internal_clock && now2.elapsed().unwrap() >= timer_interval2 * 2 && dev.note_check(step) == 0 {
                 step += 1;
                 check = 0;
                 now2 = SystemTime::now();
             };
+            if !use_internal_clock {
+                let ext_step = dev.get_clock_state().step;
+                if ext_step != step {
+                    if dev.note_check(step) == 1 && check == 1 {
+                        let msg = dev.load_notes(step, 0);
+                        mhandler.seq_port.send_message(&msg).unwrap();
+                        mhandler.seq_handle.drain_output();
+                    }
+                    step = ext_step;
+                    check = 0;
+                    if dev.note_check(step) == 1 {
+                        let msg = dev.load_notes(step, 1);
+                        mhandler.seq_port.send_message(&msg).unwrap();
+                        mhandler.seq_handle.drain_output();
+                        check = 1;
+                    }
+                }
+            }
             if step >= 16 {
                 step = 0;
             };

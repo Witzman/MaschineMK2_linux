@@ -9,6 +9,7 @@ pub enum DeviceEvent {
     ButtonUp { button: String },
     Encoder { idx: usize, value: u8 },
     ConfigSnapshot { pad_notes: Vec<u8>, encoder_ccs: Vec<u16> },
+    ClockBpm { bpm: f32 },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -112,5 +113,13 @@ mod tests {
         assert!(json.contains("\"type\":\"config_snapshot\""));
         assert!(json.contains("\"pad_notes\""));
         assert!(json.contains("\"encoder_ccs\""));
+    }
+
+    #[test]
+    fn clock_bpm_serializes() {
+        let ev = DeviceEvent::ClockBpm { bpm: 120.5 };
+        let json = serde_json::to_string(&ev).unwrap();
+        assert!(json.contains("\"type\":\"clock_bpm\""));
+        assert!(json.contains("\"bpm\""));
     }
 }
