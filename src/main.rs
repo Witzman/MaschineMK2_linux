@@ -642,6 +642,23 @@ impl<'a> MHandler<'a> {
         }
     }
 
+    fn refresh_seq_page(&self, maschine: &mut dyn Maschine) {
+        let page = maschine.get_seq_page();
+        let color = self.pad_color();
+        for i in 0..16 {
+            let b = if maschine.note_check(i) == 1 { 0.4 } else { PAD_RELEASED_BRIGHTNESS };
+            maschine.set_pad_light(i, color, b);
+        }
+        const GROUPS: [MaschineButton; 8] = [
+            MaschineButton::GroupA, MaschineButton::GroupB, MaschineButton::GroupC,
+            MaschineButton::GroupD, MaschineButton::GroupE, MaschineButton::GroupF,
+            MaschineButton::GroupG, MaschineButton::GroupH,
+        ];
+        for (i, &btn) in GROUPS.iter().enumerate() {
+            maschine.set_button_light(btn, 0xFFFFFF, if i == page { 1.0 } else { 0.05 });
+        }
+    }
+
 //Status is Byte from previous stupid naming!
     fn send_osc_button_msg(
         &mut self,
@@ -819,7 +836,12 @@ impl<'a> MHandler<'a> {
                 }
                 "pad_mode" => {
                     if modpress == 1 {
-                        if is_down { maschine.set_padmode(1); }
+                        if is_down {
+                            maschine.set_padmode(1);
+                            if maschine.get_padmode() == 2 {
+                                self.refresh_seq_page(maschine);
+                            }
+                        }
                     } else {
                         let msg = Message::RPN7(Ch1, 27, cc_math::button_cc_value(is_down));
                         self.seq_port.send_message(&msg).unwrap();
