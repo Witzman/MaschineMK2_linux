@@ -1029,28 +1029,60 @@ impl<'a> MHandler<'a> {
                 }
 
                 "group_a" => {
-                    maschine.set_midi_note_base(24);
+                    if maschine.get_padmode() == 2 && is_down {
+                        if maschine.get_mod() == 1 { maschine.apply_euclidean(1); }
+                        else { maschine.set_seq_page(0); }
+                        self.refresh_seq_page(maschine);
+                    } else { maschine.set_midi_note_base(24); }
                 }
                 "group_b" => {
-                    maschine.set_midi_note_base(36);
+                    if maschine.get_padmode() == 2 && is_down {
+                        if maschine.get_mod() == 1 { maschine.apply_euclidean(2); }
+                        else { maschine.set_seq_page(1); }
+                        self.refresh_seq_page(maschine);
+                    } else { maschine.set_midi_note_base(36); }
                 }
                 "group_c" => {
-                    maschine.set_midi_note_base(48);
+                    if maschine.get_padmode() == 2 && is_down {
+                        if maschine.get_mod() == 1 { maschine.apply_euclidean(3); }
+                        else { maschine.set_seq_page(2); }
+                        self.refresh_seq_page(maschine);
+                    } else { maschine.set_midi_note_base(48); }
                 }
                 "group_d" => {
-                    maschine.set_midi_note_base(60);
+                    if maschine.get_padmode() == 2 && is_down {
+                        if maschine.get_mod() == 1 { maschine.apply_euclidean(4); }
+                        else { maschine.set_seq_page(3); }
+                        self.refresh_seq_page(maschine);
+                    } else { maschine.set_midi_note_base(60); }
                 }
                 "group_e" => {
-                    maschine.set_midi_note_base(72);
+                    if maschine.get_padmode() == 2 && is_down {
+                        if maschine.get_mod() == 1 { maschine.apply_euclidean(5); }
+                        else { maschine.set_seq_page(4); }
+                        self.refresh_seq_page(maschine);
+                    } else { maschine.set_midi_note_base(72); }
                 }
                 "group_f" => {
-                    maschine.set_midi_note_base(84);
+                    if maschine.get_padmode() == 2 && is_down {
+                        if maschine.get_mod() == 1 { maschine.apply_euclidean(6); }
+                        else { maschine.set_seq_page(5); }
+                        self.refresh_seq_page(maschine);
+                    } else { maschine.set_midi_note_base(84); }
                 }
                 "group_g" => {
-                    maschine.set_midi_note_base(96);
+                    if maschine.get_padmode() == 2 && is_down {
+                        if maschine.get_mod() == 1 { maschine.apply_euclidean(7); }
+                        else { maschine.set_seq_page(6); }
+                        self.refresh_seq_page(maschine);
+                    } else { maschine.set_midi_note_base(96); }
                 }
                 "group_h" => {
-                    maschine.set_midi_note_base(108);
+                    if maschine.get_padmode() == 2 && is_down {
+                        if maschine.get_mod() == 1 { maschine.apply_euclidean(8); }
+                        else { maschine.set_seq_page(7); }
+                        self.refresh_seq_page(maschine);
+                    } else { maschine.set_midi_note_base(108); }
                 }
                 _ => {}
             }
