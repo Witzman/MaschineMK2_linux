@@ -28,6 +28,7 @@ extern crate png;
 
 use crate::base::{Maschine, MaschineButton, MaschineHandler, MaschinePad, MaschinePadStateTransition};
 use crate::display;
+use crate::clock::{ClockSource, ClockState};
 
 
 const BUTTON_REPORT_TO_MIKROBUTTONS_MAP: [[Option<MaschineButton>; 8]; 24] = [
@@ -304,6 +305,7 @@ pub struct Mikro {
     playing: bool,
     current_page: usize,
     selected_step: Option<usize>,
+    clock_state: ClockState,
 }
 
 impl Mikro {
@@ -358,6 +360,7 @@ impl Mikro {
             playing: false,
             current_page: 0,
             selected_step: None,
+            clock_state: ClockState::new(),
         };
 
         _self.light_buf[0] = 0x80;
@@ -576,6 +579,28 @@ impl Maschine for Mikro {
 
     fn get_playing(&self) -> bool {
         return self.playing;
+    }
+
+    fn clock_tick(&mut self) -> Option<usize> {
+        self.clock_state.on_clock_tick(std::time::Instant::now())
+    }
+
+    fn clock_start(&mut self) {
+        self.clock_state.on_start();
+        self.playing = true;
+    }
+
+    fn clock_stop(&mut self) {
+        self.clock_state.on_stop();
+        self.playing = false;
+    }
+
+    fn get_clock_state(&self) -> &ClockState {
+        &self.clock_state
+    }
+
+    fn set_clock_source(&mut self, source: ClockSource) {
+        self.clock_state.source = source;
     }
 
     fn note_save(&mut self, pad_idx: usize, note: u8, vel: u8) {
@@ -948,5 +973,37 @@ mod tests {
         assert_eq!(m.note_check(8),  1);
         assert_eq!(m.note_check(12), 1);
         assert_eq!(m.note_check(1),  0);
+    }
+
+    #[test]
+    fn clock_start_resets_state() {
+        let mut m = make_mikro();
+        m.clock_tick();
+        m.clock_tick();
+        m.clock_start();
+        assert!(m.get_playing());
+        let state = m.get_clock_state();
+        assert_eq!(state.step, 0);
+        assert_eq!(state.tick_counter, 0);
+    }
+
+    #[test]
+    fn clock_stop_halts_playing() {
+        let mut m = make_mikro();
+        m.clock_start();
+        m.clock_stop();
+        assert!(!m.get_playing());
+    }
+
+    #[test]
+    fn six_clock_ticks_return_step_on_sixth() {
+        let mut m = make_mikro();
+        m.clock_start();
+        for i in 0..5 {
+            let result = m.clock_tick();
+            assert!(result.is_none(), "tick {} should not advance step", i);
+        }
+        let result = m.clock_tick();
+        assert_eq!(result, Some(0));
     }
 }

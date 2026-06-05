@@ -18,6 +18,7 @@
 use std::os::unix::io::RawFd;
 
 use midi::Message;
+use crate::clock::ClockState;
 
 #[derive(Copy, Clone, Debug)]
 pub enum MaschineButton {
@@ -292,6 +293,12 @@ pub trait Maschine {
 
     fn set_playing(&mut self, state: usize);
     fn get_playing(&self) -> bool;
+
+    fn clock_tick(&mut self) -> Option<usize> { None }
+    fn clock_start(&mut self) {}
+    fn clock_stop(&mut self) {}
+    fn get_clock_state(&self) -> &ClockState;
+    fn set_clock_source(&mut self, _source: crate::clock::ClockSource) {}
 
     fn readable(&mut self, _: &mut dyn MaschineHandler);
 
