@@ -51,6 +51,8 @@ mod ws_server;
 mod midi_parse;
 mod config;
 mod sequencer;
+mod clock;
+use clock::{ClockSource, ClockState};
 use config::MaschineConfig;
 
 use crate::base::{Maschine, MaschineButton, MaschineHandler};
