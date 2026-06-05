@@ -50,6 +50,7 @@ mod ws_types;
 mod ws_server;
 mod midi_parse;
 mod config;
+mod sequencer;
 use config::MaschineConfig;
 
 use crate::base::{Maschine, MaschineButton, MaschineHandler};
