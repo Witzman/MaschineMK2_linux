@@ -1123,10 +1123,12 @@ impl<'a> MaschineHandler for MHandler<'a> {
                 } else {
                     maschine.note_state(pad_idx, 0);
                     maschine.set_pad_light(pad_idx, self.pad_color(), PAD_RELEASED_BRIGHTNESS);
-                };
+                }
+                maschine.set_selected_step(Some(pad_idx));
+                maschine.set_pad_light(pad_idx, 0xFF8800, 0.7);
             } else {
                 maschine.note_save(pad_idx, midi_note, self.pressure_to_vel(pressure));
-            };
+            }
         } else {
             self.seq_port.send_message(&msg).unwrap();
             self.seq_handle.drain_output();
@@ -1169,6 +1171,25 @@ impl<'a> MaschineHandler for MHandler<'a> {
     }
 
     fn encoder_step(&mut self, maschine: &mut dyn Maschine, idx: usize, state: i32) {
+        if maschine.get_padmode() == 2 {
+            if let Some(sel) = maschine.get_selected_step() {
+                match idx {
+                    0 => {
+                        let new_vel = ((maschine.get_step_vel(sel) as i32) + state)
+                            .clamp(0, 127) as u8;
+                        maschine.set_step_vel(sel, new_vel);
+                        return;
+                    }
+                    1 => {
+                        let new_note = ((maschine.get_step_note(sel) as i32) + state)
+                            .clamp(0, 127) as u8;
+                        maschine.set_step_note(sel, new_note);
+                        return;
+                    }
+                    _ => {}
+                }
+            }
+        }
         self.send_encoder_cc(maschine, idx, state);
     }
 
