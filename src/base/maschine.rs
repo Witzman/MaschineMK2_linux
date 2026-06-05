@@ -273,6 +273,23 @@ pub trait Maschine {
     fn set_padmode(&mut self, state: usize);
     fn get_padmode(&self) -> usize;
 
+    // Sequencer page (0–7)
+    fn get_seq_page(&self) -> usize { 0 }
+    fn set_seq_page(&mut self, _page: usize) {}
+
+    // Selected step for velocity/note editing (None = nothing selected)
+    fn get_selected_step(&self) -> Option<usize> { None }
+    fn set_selected_step(&mut self, _step: Option<usize>) {}
+
+    // Per-step note (offset, 0–127) and velocity on the current page
+    fn get_step_note(&self, _step: usize) -> u8 { 48 }
+    fn set_step_note(&mut self, _step: usize, _note: u8) {}
+    fn get_step_vel(&self, _step: usize) -> u8 { 80 }
+    fn set_step_vel(&mut self, _step: usize, _vel: u8) {}
+
+    // Apply Euclidean rhythm to current page, `hits` = number of active steps
+    fn apply_euclidean(&mut self, _hits: usize) {}
+
     fn set_playing(&mut self, state: usize);
     fn get_playing(&self) -> bool;
 
