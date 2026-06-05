@@ -294,14 +294,16 @@ pub struct Mikro {
     mod_state: usize,
     padmode: usize,
 
-    note: [u8; 16],
-    note_state: [usize; 16],
+    note: [[u8; 16]; 8],
+    note_state: [[usize; 16]; 8],
     noteset: bool,
     noteidx: usize,
 
-    vel: [U7; 16],
+    vel: [[U7; 16]; 8],
     speed: u64,
     playing: bool,
+    current_page: usize,
+    selected_step: Option<usize>,
 }
 
 impl Mikro {
@@ -345,15 +347,17 @@ impl Mikro {
             mod_state: 0,
             padmode: 0,
 
-            note: [48u8; 16],
-            note_state: [0usize; 16],
+            note: [[48u8; 16]; 8],
+            note_state: [[0usize; 16]; 8],
             noteset: false,
             noteidx: 0,
 
-            vel: [80u8; 16],
+            vel: [[80u8; 16]; 8],
             speed: 100,
 
             playing: false,
+            current_page: 0,
+            selected_step: None,
         };
 
         _self.light_buf[0] = 0x80;
@@ -526,6 +530,42 @@ impl Maschine for Mikro {
         return self.padmode;
     }
 
+    fn get_seq_page(&self) -> usize { self.current_page }
+
+    fn set_seq_page(&mut self, page: usize) {
+        if page < 8 {
+            self.current_page = page;
+            self.selected_step = None;
+        }
+    }
+
+    fn get_selected_step(&self) -> Option<usize> { self.selected_step }
+
+    fn set_selected_step(&mut self, step: Option<usize>) { self.selected_step = step; }
+
+    fn get_step_note(&self, step: usize) -> u8 {
+        self.note[self.current_page][step]
+    }
+
+    fn set_step_note(&mut self, step: usize, note: u8) {
+        self.note[self.current_page][step] = note;
+    }
+
+    fn get_step_vel(&self, step: usize) -> u8 {
+        self.vel[self.current_page][step]
+    }
+
+    fn set_step_vel(&mut self, step: usize, vel: u8) {
+        self.vel[self.current_page][step] = vel;
+    }
+
+    fn apply_euclidean(&mut self, hits: usize) {
+        let pattern = crate::sequencer::euclidean_pattern(16, hits);
+        for i in 0..16 {
+            self.note_state[self.current_page][i] = if pattern[i] { 1 } else { 0 };
+        }
+    }
+
     fn set_playing(&mut self, state: usize) {
         if state == 1 {
             self.playing = true;
@@ -539,35 +579,34 @@ impl Maschine for Mikro {
     }
 
     fn note_save(&mut self, pad_idx: usize, note: u8, vel: u8) {
-        if self.noteset == true {
-            self.vel[self.noteidx] = vel;
-            self.note[self.noteidx] = note;
-            println!(
-                "step: {}, note:{}, velocity{}",
-                self.noteidx, self.note[self.noteidx], self.vel[self.noteidx]
-            );
+        if self.noteset {
+            self.vel[self.current_page][self.noteidx] = vel;
+            self.note[self.current_page][self.noteidx] = note;
+            println!("step: {}, note:{}, velocity:{}", self.noteidx,
+                self.note[self.current_page][self.noteidx],
+                self.vel[self.current_page][self.noteidx]);
             self.noteset = false;
         } else {
             self.noteidx = pad_idx;
             self.noteset = true;
-        };
+        }
     }
 
     fn note_state(&mut self, pad_idx: usize, msg: usize) {
-        self.note_state[pad_idx] = msg;
+        self.note_state[self.current_page][pad_idx] = msg;
     }
 
     fn note_check(&self, pad_idx: usize) -> usize {
-        return self.note_state[pad_idx];
+        self.note_state[self.current_page][pad_idx]
     }
 
     fn load_notes(&self, pad_idx: usize, context: usize) -> midi::Message {
         if context == 1 {
-            let msg = Message::NoteOn(Ch2, self.note[pad_idx], self.vel[pad_idx]);
-            return msg;
+            Message::NoteOn(Ch2, self.note[self.current_page][pad_idx],
+                                  self.vel[self.current_page][pad_idx])
         } else {
-            let msg = Message::NoteOff(Ch2, self.note[pad_idx], self.vel[pad_idx]);
-            return msg;
+            Message::NoteOff(Ch2, self.note[self.current_page][pad_idx],
+                                   self.vel[self.current_page][pad_idx])
         }
     }
 
@@ -856,5 +895,58 @@ impl Maschine for Mikro {
 
         self.send_display_bits(0xE0, &left);
         self.send_display_bits(0xE1, &right);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::base::Maschine;
+
+    fn make_mikro() -> Mikro { Mikro::new(0) }
+
+    #[test]
+    fn pages_are_independent() {
+        let mut m = make_mikro();
+        m.note_state(0, 1);          // page 0 step 0 = on
+        m.set_seq_page(1);
+        assert_eq!(m.note_check(0), 0); // page 1 step 0 = still off
+    }
+
+    #[test]
+    fn set_seq_page_clears_selected_step() {
+        let mut m = make_mikro();
+        m.set_selected_step(Some(3));
+        m.set_seq_page(1);
+        assert_eq!(m.get_selected_step(), None);
+    }
+
+    #[test]
+    fn step_vel_independent_per_page() {
+        let mut m = make_mikro();
+        m.set_step_vel(0, 100);
+        assert_eq!(m.get_step_vel(0), 100);
+        m.set_seq_page(1);
+        assert_eq!(m.get_step_vel(0), 80); // default unchanged
+    }
+
+    #[test]
+    fn step_note_independent_per_page() {
+        let mut m = make_mikro();
+        m.set_step_note(0, 60);
+        assert_eq!(m.get_step_note(0), 60);
+        m.set_seq_page(1);
+        assert_eq!(m.get_step_note(0), 48); // default unchanged
+    }
+
+    #[test]
+    fn apply_euclidean_4_hits() {
+        let mut m = make_mikro();
+        m.apply_euclidean(4);
+        assert_eq!(m.note_check(0),  1);
+        assert_eq!(m.note_check(4),  1);
+        assert_eq!(m.note_check(8),  1);
+        assert_eq!(m.note_check(12), 1);
+        assert_eq!(m.note_check(1),  0);
     }
 }
