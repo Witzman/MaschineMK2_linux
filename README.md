@@ -144,7 +144,7 @@ Check with `aconnect -l`. Connect with `aconnect <source> N:1` to drive LEDs fro
 |--------|------|-------------------|-------|
 | Pads | Note On/Off | `note_base + pad_notes[i]` | Velocity-sensitive; offsets configurable |
 | Group A–H | — | — | Sets note base to C2–C9 (MIDI 24–108) |
-| Transport buttons (Play, Stop, Rec, …) | CC 1–14 | — | Value 127 = down, 0 = up |
+| Transport buttons (Play, Stop, Rec, …) | CC 1–14, 24–48 | — | Value 127 = down, 0 = up |
 | Encoders 1–8 | CC | 16–23 | Absolute 0–127; CC numbers configurable per-encoder via `maschine.json` or web editor |
 | A8 knob | CC 15 | — | Absolute |
 
