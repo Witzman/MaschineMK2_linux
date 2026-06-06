@@ -784,6 +784,7 @@ impl<'a> MHandler<'a> {
                         self.seq_port.send_message(&msg).unwrap();
                         self.seq_handle.drain_output();
                     } else if is_down {
+                        maschine.clock_start();
                         maschine.set_playing(1);
                     };
                 }
