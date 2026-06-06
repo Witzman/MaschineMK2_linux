@@ -697,6 +697,21 @@ impl<'a> MHandler<'a> {
         }
     }
 
+    fn refresh_normal_mode(&self, maschine: &mut dyn Maschine) {
+        let color = self.pad_color();
+        for i in 0..16 {
+            maschine.set_pad_light(i, color, PAD_RELEASED_BRIGHTNESS);
+        }
+        const GROUPS: [MaschineButton; 8] = [
+            MaschineButton::GroupA, MaschineButton::GroupB, MaschineButton::GroupC,
+            MaschineButton::GroupD, MaschineButton::GroupE, MaschineButton::GroupF,
+            MaschineButton::GroupG, MaschineButton::GroupH,
+        ];
+        for &btn in GROUPS.iter() {
+            maschine.set_button_light(btn, 0xFFFFFF, 0.05);
+        }
+    }
+
 //Status is Byte from previous stupid naming!
     fn send_osc_button_msg(
         &mut self,
@@ -879,6 +894,8 @@ impl<'a> MHandler<'a> {
                             maschine.set_padmode(1);
                             if maschine.get_padmode() == 2 {
                                 self.refresh_seq_page(maschine);
+                            } else {
+                                self.refresh_normal_mode(maschine);
                             }
                         }
                     } else {
