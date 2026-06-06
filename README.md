@@ -11,7 +11,7 @@ Forked from [wrl/maschine.rs](https://github.com/wrl/maschine.rs).
 ### MIDI Output
 - **Pads** → ALSA MIDI Note On/Off (velocity-sensitive); note = `note_base + pad_offset`
 - **Buttons** → CC messages (mappable in any DAW)
-- **Encoders** → CC messages (CC numbers configurable per-encoder, default 17–24)
+- **Encoders** → CC messages (CC numbers configurable per-encoder, default 16–23)
 - **Group buttons A–H** → change MIDI note base (C2–C9)
 
 ### MIDI Input
@@ -32,7 +32,7 @@ Settings saved to `maschine.json` in the working directory. Loaded on startup. E
 ```json
 {
   "pad_notes": [12,13,14,15,8,9,10,11,4,5,6,7,0,1,2,3],
-  "encoder_ccs": [17,18,19,20,21,22,23,24]
+  "encoder_ccs": [16,17,18,19,20,21,22,23]
 }
 ```
 
@@ -145,7 +145,7 @@ Check with `aconnect -l`. Connect with `aconnect <source> N:1` to drive LEDs fro
 | Pads | Note On/Off | `note_base + pad_notes[i]` | Velocity-sensitive; offsets configurable |
 | Group A–H | — | — | Sets note base to C2–C9 (MIDI 24–108) |
 | Transport buttons (Play, Stop, Rec, …) | CC 1–14 | — | Value 127 = down, 0 = up |
-| Encoders 1–8 | CC | 17–24 | Absolute 0–127; CC numbers configurable per-encoder |
+| Encoders 1–8 | CC | 16–23 | Absolute 0–127; CC numbers configurable per-encoder via `maschine.json` or web editor |
 | A8 knob | CC 15 | — | Absolute |
 
 ### Pad note offsets
