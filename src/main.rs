@@ -1157,13 +1157,13 @@ impl<'a> MaschineHandler for MHandler<'a> {
             if maschine.get_mod() != 1 {
                 if maschine.note_check(pad_idx) == 0 {
                     maschine.note_state(pad_idx, 1);
-                    maschine.set_pad_light(pad_idx, self.pad_color(), pressure.sqrt());
+                    maschine.set_selected_step(Some(pad_idx));
+                    maschine.set_pad_light(pad_idx, 0xFF8800, 0.7);
                 } else {
                     maschine.note_state(pad_idx, 0);
+                    maschine.set_selected_step(None);
                     maschine.set_pad_light(pad_idx, self.pad_color(), PAD_RELEASED_BRIGHTNESS);
                 }
-                maschine.set_selected_step(Some(pad_idx));
-                maschine.set_pad_light(pad_idx, 0xFF8800, 0.7);
             } else {
                 maschine.note_save(pad_idx, midi_note, self.pressure_to_vel(pressure));
             }
