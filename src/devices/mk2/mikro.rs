@@ -476,7 +476,10 @@ impl Maschine for Mikro {
     }
 
     fn set_pad_light(&mut self, pad: usize, color: u32, brightness: f32) {
-        let offset = 1 + (pad * 3);
+        // LED report is display-order (top-left first); input is bottom-up row-major.
+        // PAD_DISPLAY_ORDER is its own inverse, so applying it remaps correctly in both directions.
+        const PAD_LED_MAP: [usize; 16] = [12, 13, 14, 15, 8, 9, 10, 11, 4, 5, 6, 7, 0, 1, 2, 3];
+        let offset = 1 + (PAD_LED_MAP[pad] * 3);
         let rgb = &mut self.light_buf[offset..(offset + 3)];
 
         set_rgb_light(rgb, color, brightness);
