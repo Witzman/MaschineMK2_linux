@@ -890,6 +890,11 @@ impl Maschine for Mikro {
     }
 
     fn write_display(&mut self) {
+        // send_display_bits sends one byte per HID report — floods USB at 2048 writes/100ms.
+        // Display disabled until send_display_bits is rewritten to use proper bulk chunks.
+        return;
+
+        #[allow(unreachable_code)]
         const SZ: usize = display::HEIGHT * display::STRIDE;
 
         let note_names = ["C-1","C0","C1","C2","C3","C4","C5","C6","C7","C8","C9"];
