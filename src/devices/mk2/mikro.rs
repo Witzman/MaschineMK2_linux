@@ -412,16 +412,20 @@ impl Mikro {
 
     fn read_pads(&mut self, handler: &mut dyn MaschineHandler, buf: &[u8]) {
         let pads: &[u16] = unsafe { transmute(buf) };
+        // HID report is top-row-first (index 0 = top-left pad).
+        // Remap to bottom-row-first so pad 0 = physical bottom-left (lowest note).
+        const PAD_HID_TO_PHYS: [usize; 16] = [12, 13, 14, 15, 8, 9, 10, 11, 4, 5, 6, 7, 0, 1, 2, 3];
 
         for i in 0..16 {
+            let pad = PAD_HID_TO_PHYS[i];
             let pressure = ((pads[i] & 0xFFF) as f32) / 4095.0;
 
-            match self.pads[i].pressure_val(pressure) {
-                MaschinePadStateTransition::Pressed => handler.pad_pressed(self, i, pressure),
+            match self.pads[pad].pressure_val(pressure) {
+                MaschinePadStateTransition::Pressed => handler.pad_pressed(self, pad, pressure),
 
-                MaschinePadStateTransition::Aftertouch => handler.pad_aftertouch(self, i, pressure),
+                MaschinePadStateTransition::Aftertouch => handler.pad_aftertouch(self, pad, pressure),
 
-                MaschinePadStateTransition::Released => handler.pad_released(self, i),
+                MaschinePadStateTransition::Released => handler.pad_released(self, pad),
 
                 _ => {}
             }
