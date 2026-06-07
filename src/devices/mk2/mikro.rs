@@ -429,30 +429,20 @@ impl Mikro {
     }
 
     fn send_display_bits(&mut self, report_id: u8, bits: &[u8]) {
-        let mut screen_buf = [0u8; 1 + 8 + 512];
-        screen_buf[0] = report_id;
-        screen_buf[5] = 0x08;
-        screen_buf[7] = 0x20;
-        screen_buf[1] = 0;
-        screen_buf[3] = 0;
+        debug_assert_eq!(bits.len(), 1024);
+        let mut buf = [0u8; 1 + 8 + 512];
+        buf[0] = report_id;
+        buf[5] = 0x08;
+        buf[7] = 0x20;
+        buf[1] = 0;
 
-        let mut col: u8 = 0;
-        let mut page: u8 = 0;
-        let mut steps: u8 = 0;
+        buf[3] = 0;
+        buf[9..521].copy_from_slice(&bits[0..512]);
+        let _ = unistd::write(self.dev, &buf);
 
-        for &byte in bits {
-            screen_buf[1] = col;
-            screen_buf[3] = page;
-            screen_buf[9] = byte;
-            let _ = unistd::write(self.dev, &screen_buf);
-            col += 1;
-            steps += 1;
-            if steps > 30 {
-                steps = 0;
-                col = 0;
-                page += 1;
-            }
-        }
+        buf[3] = 32;
+        buf[9..521].copy_from_slice(&bits[512..1024]);
+        let _ = unistd::write(self.dev, &buf);
     }
 }
 
@@ -893,11 +883,6 @@ impl Maschine for Mikro {
     }
 
     fn write_display(&mut self) {
-        // send_display_bits sends one byte per HID report — floods USB at 2048 writes/100ms.
-        // Display disabled until send_display_bits is rewritten to use proper bulk chunks.
-        return;
-
-        #[allow(unreachable_code)]
         const SZ: usize = display::HEIGHT * display::STRIDE;
 
         let note_names = ["C-1","C0","C1","C2","C3","C4","C5","C6","C7","C8","C9"];

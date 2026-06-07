@@ -10,14 +10,14 @@ pub fn start(cmd_tx: mpsc::Sender<WsCommand>, event_rx: mpsc::Receiver<DeviceEve
 }
 
 fn run(cmd_tx: mpsc::Sender<WsCommand>, event_rx: mpsc::Receiver<DeviceEvent>) {
-    let listener = match TcpListener::bind("127.0.0.1:9001") {
+    let listener = match TcpListener::bind("0.0.0.0:9001") {
         Ok(l) => l,
         Err(e) => {
             eprintln!("error: WebSocket server failed to bind on port 9001: {}", e);
             return;
         }
     };
-    eprintln!("web editor: open web/index.html in browser  (ws://127.0.0.1:9001)");
+    eprintln!("web editor: open http://<pi-ip>:9000  (ws://0.0.0.0:9001)");
 
     for stream in listener.incoming() {
         let stream = match stream {

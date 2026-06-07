@@ -288,10 +288,10 @@ function applyConfig(pad_notes, encoder_ccs) {
 
 function connect() {
   const statusEl = document.getElementById('status');
-  ws = new WebSocket('ws://127.0.0.1:9001');
+  ws = new WebSocket(`ws://${location.hostname}:9001`);
 
   ws.onopen = () => {
-    statusEl.textContent = 'Connected — ws://127.0.0.1:9001';
+    statusEl.textContent = `Connected — ws://${location.hostname}:9001`;
     statusEl.className = 'connected';
   };
   ws.onclose = () => {
