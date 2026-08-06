@@ -1121,7 +1121,9 @@ impl<'a> MHandler<'a> {
 
                 "group_a" => {
                     let msg = Message::RPN7(Ch1, cc_math::group_cc(0), cc_math::button_cc_value(is_down));
-                    let _ = self.seq_port.send_message(&msg);
+                    if let Err(err) = self.seq_port.send_message(&msg) {
+                        println!("group button: MIDI send failed: {:?}", err);
+                    }
                     self.seq_handle.drain_output();
                     if maschine.get_padmode() == 2 && is_down {
                         if maschine.get_mod() == 1 { maschine.apply_euclidean(1); }
@@ -1131,7 +1133,9 @@ impl<'a> MHandler<'a> {
                 }
                 "group_b" => {
                     let msg = Message::RPN7(Ch1, cc_math::group_cc(1), cc_math::button_cc_value(is_down));
-                    let _ = self.seq_port.send_message(&msg);
+                    if let Err(err) = self.seq_port.send_message(&msg) {
+                        println!("group button: MIDI send failed: {:?}", err);
+                    }
                     self.seq_handle.drain_output();
                     if maschine.get_padmode() == 2 && is_down {
                         if maschine.get_mod() == 1 { maschine.apply_euclidean(2); }
@@ -1141,7 +1145,9 @@ impl<'a> MHandler<'a> {
                 }
                 "group_c" => {
                     let msg = Message::RPN7(Ch1, cc_math::group_cc(2), cc_math::button_cc_value(is_down));
-                    let _ = self.seq_port.send_message(&msg);
+                    if let Err(err) = self.seq_port.send_message(&msg) {
+                        println!("group button: MIDI send failed: {:?}", err);
+                    }
                     self.seq_handle.drain_output();
                     if maschine.get_padmode() == 2 && is_down {
                         if maschine.get_mod() == 1 { maschine.apply_euclidean(3); }
@@ -1151,7 +1157,9 @@ impl<'a> MHandler<'a> {
                 }
                 "group_d" => {
                     let msg = Message::RPN7(Ch1, cc_math::group_cc(3), cc_math::button_cc_value(is_down));
-                    let _ = self.seq_port.send_message(&msg);
+                    if let Err(err) = self.seq_port.send_message(&msg) {
+                        println!("group button: MIDI send failed: {:?}", err);
+                    }
                     self.seq_handle.drain_output();
                     if maschine.get_padmode() == 2 && is_down {
                         if maschine.get_mod() == 1 { maschine.apply_euclidean(4); }
@@ -1161,7 +1169,9 @@ impl<'a> MHandler<'a> {
                 }
                 "group_e" => {
                     let msg = Message::RPN7(Ch1, cc_math::group_cc(4), cc_math::button_cc_value(is_down));
-                    let _ = self.seq_port.send_message(&msg);
+                    if let Err(err) = self.seq_port.send_message(&msg) {
+                        println!("group button: MIDI send failed: {:?}", err);
+                    }
                     self.seq_handle.drain_output();
                     if maschine.get_padmode() == 2 && is_down {
                         if maschine.get_mod() == 1 { maschine.apply_euclidean(5); }
@@ -1171,7 +1181,9 @@ impl<'a> MHandler<'a> {
                 }
                 "group_f" => {
                     let msg = Message::RPN7(Ch1, cc_math::group_cc(5), cc_math::button_cc_value(is_down));
-                    let _ = self.seq_port.send_message(&msg);
+                    if let Err(err) = self.seq_port.send_message(&msg) {
+                        println!("group button: MIDI send failed: {:?}", err);
+                    }
                     self.seq_handle.drain_output();
                     if maschine.get_padmode() == 2 && is_down {
                         if maschine.get_mod() == 1 { maschine.apply_euclidean(6); }
@@ -1181,7 +1193,9 @@ impl<'a> MHandler<'a> {
                 }
                 "group_g" => {
                     let msg = Message::RPN7(Ch1, cc_math::group_cc(6), cc_math::button_cc_value(is_down));
-                    let _ = self.seq_port.send_message(&msg);
+                    if let Err(err) = self.seq_port.send_message(&msg) {
+                        println!("group button: MIDI send failed: {:?}", err);
+                    }
                     self.seq_handle.drain_output();
                     if maschine.get_padmode() == 2 && is_down {
                         if maschine.get_mod() == 1 { maschine.apply_euclidean(7); }
@@ -1191,7 +1205,9 @@ impl<'a> MHandler<'a> {
                 }
                 "group_h" => {
                     let msg = Message::RPN7(Ch1, cc_math::group_cc(7), cc_math::button_cc_value(is_down));
-                    let _ = self.seq_port.send_message(&msg);
+                    if let Err(err) = self.seq_port.send_message(&msg) {
+                        println!("group button: MIDI send failed: {:?}", err);
+                    }
                     self.seq_handle.drain_output();
                     if maschine.get_padmode() == 2 && is_down {
                         if maschine.get_mod() == 1 { maschine.apply_euclidean(8); }
