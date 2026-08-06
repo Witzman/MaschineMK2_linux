@@ -7,6 +7,10 @@ pub fn button_cc_value(is_down: bool) -> u8 {
     if is_down { 127 } else { 0 }
 }
 
+pub fn group_cc(group_idx: usize) -> u16 {
+    80 + (group_idx.min(7) as u16)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -39,5 +43,16 @@ mod tests {
     #[test]
     fn button_release_gives_0() {
         assert_eq!(button_cc_value(false), 0);
+    }
+
+    #[test]
+    fn group_cc_maps_a_to_80_and_h_to_87() {
+        assert_eq!(group_cc(0), 80);
+        assert_eq!(group_cc(7), 87);
+    }
+
+    #[test]
+    fn group_cc_clamps_above_h() {
+        assert_eq!(group_cc(99), 87);
     }
 }

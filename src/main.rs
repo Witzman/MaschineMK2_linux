@@ -1120,6 +1120,9 @@ impl<'a> MHandler<'a> {
                 }
 
                 "group_a" => {
+                    let msg = Message::RPN7(Ch1, cc_math::group_cc(0), cc_math::button_cc_value(is_down));
+                    let _ = self.seq_port.send_message(&msg);
+                    self.seq_handle.drain_output();
                     if maschine.get_padmode() == 2 && is_down {
                         if maschine.get_mod() == 1 { maschine.apply_euclidean(1); }
                         else { maschine.set_seq_page(0); }
@@ -1127,6 +1130,9 @@ impl<'a> MHandler<'a> {
                     } else { maschine.set_midi_note_base(24); }
                 }
                 "group_b" => {
+                    let msg = Message::RPN7(Ch1, cc_math::group_cc(1), cc_math::button_cc_value(is_down));
+                    let _ = self.seq_port.send_message(&msg);
+                    self.seq_handle.drain_output();
                     if maschine.get_padmode() == 2 && is_down {
                         if maschine.get_mod() == 1 { maschine.apply_euclidean(2); }
                         else { maschine.set_seq_page(1); }
@@ -1134,6 +1140,9 @@ impl<'a> MHandler<'a> {
                     } else { maschine.set_midi_note_base(36); }
                 }
                 "group_c" => {
+                    let msg = Message::RPN7(Ch1, cc_math::group_cc(2), cc_math::button_cc_value(is_down));
+                    let _ = self.seq_port.send_message(&msg);
+                    self.seq_handle.drain_output();
                     if maschine.get_padmode() == 2 && is_down {
                         if maschine.get_mod() == 1 { maschine.apply_euclidean(3); }
                         else { maschine.set_seq_page(2); }
@@ -1141,6 +1150,9 @@ impl<'a> MHandler<'a> {
                     } else { maschine.set_midi_note_base(48); }
                 }
                 "group_d" => {
+                    let msg = Message::RPN7(Ch1, cc_math::group_cc(3), cc_math::button_cc_value(is_down));
+                    let _ = self.seq_port.send_message(&msg);
+                    self.seq_handle.drain_output();
                     if maschine.get_padmode() == 2 && is_down {
                         if maschine.get_mod() == 1 { maschine.apply_euclidean(4); }
                         else { maschine.set_seq_page(3); }
@@ -1148,6 +1160,9 @@ impl<'a> MHandler<'a> {
                     } else { maschine.set_midi_note_base(60); }
                 }
                 "group_e" => {
+                    let msg = Message::RPN7(Ch1, cc_math::group_cc(4), cc_math::button_cc_value(is_down));
+                    let _ = self.seq_port.send_message(&msg);
+                    self.seq_handle.drain_output();
                     if maschine.get_padmode() == 2 && is_down {
                         if maschine.get_mod() == 1 { maschine.apply_euclidean(5); }
                         else { maschine.set_seq_page(4); }
@@ -1155,6 +1170,9 @@ impl<'a> MHandler<'a> {
                     } else { maschine.set_midi_note_base(72); }
                 }
                 "group_f" => {
+                    let msg = Message::RPN7(Ch1, cc_math::group_cc(5), cc_math::button_cc_value(is_down));
+                    let _ = self.seq_port.send_message(&msg);
+                    self.seq_handle.drain_output();
                     if maschine.get_padmode() == 2 && is_down {
                         if maschine.get_mod() == 1 { maschine.apply_euclidean(6); }
                         else { maschine.set_seq_page(5); }
@@ -1162,6 +1180,9 @@ impl<'a> MHandler<'a> {
                     } else { maschine.set_midi_note_base(84); }
                 }
                 "group_g" => {
+                    let msg = Message::RPN7(Ch1, cc_math::group_cc(6), cc_math::button_cc_value(is_down));
+                    let _ = self.seq_port.send_message(&msg);
+                    self.seq_handle.drain_output();
                     if maschine.get_padmode() == 2 && is_down {
                         if maschine.get_mod() == 1 { maschine.apply_euclidean(7); }
                         else { maschine.set_seq_page(6); }
@@ -1169,6 +1190,9 @@ impl<'a> MHandler<'a> {
                     } else { maschine.set_midi_note_base(96); }
                 }
                 "group_h" => {
+                    let msg = Message::RPN7(Ch1, cc_math::group_cc(7), cc_math::button_cc_value(is_down));
+                    let _ = self.seq_port.send_message(&msg);
+                    self.seq_handle.drain_output();
                     if maschine.get_padmode() == 2 && is_down {
                         if maschine.get_mod() == 1 { maschine.apply_euclidean(8); }
                         else { maschine.set_seq_page(7); }
