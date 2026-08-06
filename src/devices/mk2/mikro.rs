@@ -285,6 +285,7 @@ pub struct Mikro {
     light_buf: [u8; 49],
     light_buf2: [u8; 32],
     light_buf3: [u8; 57],
+    lights_dirty: bool,
 
     pads: [MaschinePad; 16],
     buttons: [u8; 27],
@@ -336,6 +337,7 @@ impl Mikro {
             light_buf: [0u8; 49],
             light_buf2: [0u8; 32],
             light_buf3: [0u8; 57],
+            lights_dirty: true,
 
             pads: Mikro::sixteen_maschine_pads(),
             buttons: [
@@ -463,13 +465,30 @@ impl Maschine for Mikro {
         return self.dev;
     }
 
+    fn set_fd(&mut self, fd: io::RawFd) {
+        self.dev = fd;
+    }
+
+    fn invalidate_lights(&mut self) {
+        // Force the next write_lights() to push the full LED state, e.g. after
+        // the watchdog reopened the device on a new fd.
+        self.lights_dirty = true;
+    }
+
     fn write_lights(&mut self) {
+        // Avoid pointless HID traffic: the previous code rewrote all three LED
+        // reports every 16ms even when nothing had changed.
+        if !self.lights_dirty {
+            return;
+        }
         let _ = unistd::write(self.dev, &self.light_buf);
         let _ = unistd::write(self.dev, &self.light_buf2);
         let _ = unistd::write(self.dev, &self.light_buf3);
+        self.lights_dirty = false;
     }
 
     fn set_pad_light(&mut self, pad: usize, color: u32, brightness: f32) {
+        self.lights_dirty = true;
         // LED report is display-order (top-left first); input is bottom-up row-major.
         // PAD_DISPLAY_ORDER is its own inverse, so applying it remaps correctly in both directions.
         const PAD_LED_MAP: [usize; 16] = [12, 13, 14, 15, 8, 9, 10, 11, 4, 5, 6, 7, 0, 1, 2, 3];
@@ -642,6 +661,7 @@ impl Maschine for Mikro {
     }
 
     fn set_button_light(&mut self, btn: MaschineButton, _color: u32, brightness: f32) {
+        self.lights_dirty = true;
         let mut idx = 0;
         let mut idx2 = 0;
         match btn {
@@ -709,21 +729,33 @@ impl Maschine for Mikro {
     }
 
     fn readable(&mut self, handler: &mut dyn MaschineHandler) {
-        let mut buf = [0u8; 512];
+        // The MK2 stops sending input reports altogether if the host does not
+        // keep up with its ~750 reports/s. Reading a single report per poll
+        // iteration left us draining at ~220/s, and the device went silent
+        // within seconds (pads, buttons and encoders all dead, LEDs still
+        // working). Drain the fd until EAGAIN on every wakeup.
+        loop {
+            let mut buf = [0u8; 512];
 
-        let nbytes = match unistd::read(self.dev, &mut buf) {
-            Err(err) => panic!("read failed: {}", err.to_string()),
-            Ok(nbytes) => nbytes,
-        };
+            let nbytes = match unistd::read(self.dev, &mut buf) {
+                Err(nix::Error::Sys(nix::errno::Errno::EAGAIN)) => return,
+                Err(err) => panic!("read failed: {}", err.to_string()),
+                Ok(nbytes) => nbytes,
+            };
 
-        let report_nr = buf[0];
-        let buf = &buf[1..nbytes];
+            if nbytes == 0 {
+                return;
+            }
 
-        match report_nr {
-            0x01 => self.read_buttons(handler, &buf),
-            0x20 => self.read_pads(handler, &buf),
-            0x03 => handler.midi_in_received(self, buf),
-            _ => println!(" :: {:2X}: got {} bytes", report_nr, nbytes),
+            let report_nr = buf[0];
+            let buf = &buf[1..nbytes];
+
+            match report_nr {
+                0x01 => self.read_buttons(handler, &buf),
+                0x20 => self.read_pads(handler, &buf),
+                0x03 => handler.midi_in_received(self, buf),
+                _ => println!(" :: {:2X}: got {} bytes", report_nr, nbytes),
+            }
         }
     }
 

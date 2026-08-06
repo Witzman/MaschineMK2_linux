@@ -59,7 +59,7 @@ use crate::base::{Maschine, MaschineButton, MaschineHandler};
 use std::sync::mpsc;
 use crate::ws_types::{DeviceEvent, WsCommand};
 
-fn ev_loop(dev: &mut dyn Maschine, mhandler: &mut MHandler) {
+fn ev_loop(dev: &mut dyn Maschine, mhandler: &mut MHandler, dev_path: &str) {
     let mut fds = [
         PollFd::new(dev.get_fd(), POLLIN, EventFlags::empty()),
         PollFd::new(mhandler.osc_socket.as_raw_fd(), POLLIN, EventFlags::empty()),
@@ -75,12 +75,46 @@ fn ev_loop(dev: &mut dyn Maschine, mhandler: &mut MHandler) {
     let mut timer_interval2;
     let mut step = 0;
     let mut check = 0;
+    let mut last_report = SystemTime::now();
+    let mut reopens: u64 = 0;
+    let input_timeout = Duration::from_millis(50);
     let mut active = false;
     loop {
         poll(&mut fds, 16).unwrap();
 
         if fds[0].revents().unwrap().contains(POLLIN) {
             dev.readable(mhandler);
+            last_report = SystemTime::now();
+        }
+
+        // Input watchdog. The device streams ~750 reports/s unconditionally, so
+        // any silence longer than this means the kernel hidraw layer has stopped
+        // delivering to our fd (verified with usbmon: the URBs keep completing
+        // with data while read() returns EAGAIN forever). A fresh open() is the
+        // only known recovery.
+        if last_report.elapsed().unwrap() >= input_timeout {
+            // Close BEFORE reopening: usbhid only tears down and resubmits the
+            // interrupt URB when the device user count drops to zero, and that
+            // teardown is what actually revives the stream. Opening first left
+            // one user held throughout, and the reopen had no effect at all.
+            let _ = nix::unistd::close(dev.get_fd());
+            match fcntl::open(
+                Path::new(dev_path),
+                O_RDWR | O_NONBLOCK,
+                sys::stat::Mode::empty(),
+            ) {
+                Ok(new_fd) => {
+                    dev.set_fd(new_fd);
+                    dev.invalidate_lights();
+                    fds[0] = PollFd::new(new_fd, POLLIN, EventFlags::empty());
+                    reopens += 1;
+                    println!("watchdog: input stalled, reopened {} (reopen #{})", dev_path, reopens);
+                }
+                Err(err) => {
+                    println!("watchdog: reopen of {} failed: {}", dev_path, err);
+                }
+            }
+            last_report = SystemTime::now();
         }
 
         if fds[1].revents().unwrap().contains(POLLIN) {
@@ -175,7 +209,8 @@ fn ev_loop(dev: &mut dyn Maschine, mhandler: &mut MHandler) {
             now = SystemTime::now();
         }
         if now_display.elapsed().unwrap() >= display_interval {
-            dev.write_display();
+            // Display disabled: the rendering is not functional yet and this
+            // issued ~180 writes/s of 521-byte reports. Re-enable with care.
             now_display = SystemTime::now();
         }
 
@@ -1359,11 +1394,12 @@ fn main() {
         encoder_ccs: cfg.encoder_ccs,
     };
 
-    dev.clear_screen();
+    // Display disabled, see write_display() above.
+    // dev.clear_screen();
 
     for i in 0..16 {
         dev.set_pad_light(i, handler.pad_color(), PAD_RELEASED_BRIGHTNESS);
     }
 
-    ev_loop(&mut dev, &mut handler);
+    ev_loop(&mut dev, &mut handler, &args[1]);
 }

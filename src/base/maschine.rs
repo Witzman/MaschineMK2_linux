@@ -245,6 +245,12 @@ pub enum MaschineButton {
 pub trait Maschine {
     fn get_fd(&self) -> RawFd;
 
+    // Used by the input watchdog: the kernel hidraw layer stops delivering
+    // reports to an open fd after a few seconds at this device report rate,
+    // and only a fresh open() revives it.
+    fn set_fd(&mut self, _fd: RawFd) {}
+    fn invalidate_lights(&mut self) {}
+
     fn get_pad_pressure(&self, pad_idx: usize) -> Result<f32, ()>;
 
     fn get_midi_note_base(&self) -> u8;
