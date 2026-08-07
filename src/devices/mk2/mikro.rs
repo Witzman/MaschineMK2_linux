@@ -295,6 +295,7 @@ pub struct Mikro {
     calib_x: [i32; 2],
     calib_y: [i32; 2],
     calib_accum: [i32; 4],
+    calib_prev: [i32; 4],
     calib_dirty: bool,
     lights_dirty: bool,
 
@@ -356,6 +357,7 @@ impl Mikro {
             calib_x: [0, (display::WIDTH - 1) as i32],
             calib_y: [0, (display::HEIGHT - 1) as i32],
             calib_accum: [0; 4],
+            calib_prev: [-1; 4],
             calib_dirty: false,
             lights_dirty: true,
 
@@ -1033,22 +1035,36 @@ impl Maschine for Mikro {
     fn calib_set(&mut self, on: bool) {
         self.calib = on;
         if on {
-            self.calib_x = [0, (display::WIDTH - 1) as i32];
-            self.calib_y = [0, (display::HEIGHT - 1) as i32];
+            // Start the lines inside the panel so none of them is stranded
+            // off-screen and unreachable.
+            self.calib_x = [8, (display::WIDTH / 2) as i32];
+            self.calib_y = [8, (display::HEIGHT / 2) as i32];
+            self.calib_accum = [0; 4];
+            self.calib_prev = [-1; 4];
             self.draw_calib();
         }
         println!("calibration {}", if on { "ON" } else { "OFF" });
     }
 
-    fn calib_move(&mut self, idx: usize, delta: i32) {
+    fn calib_move(&mut self, idx: usize, raw: i32) {
         if idx >= 4 {
             return;
         }
-        // encoder_step hands over a raw HID delta, not one detent - the CC
-        // path divides it by 4. Without that, one flick pinned every line to
-        // its limit immediately. Capped so a fast spin stays controllable.
+        // encoder_step is handed the encoder's ABSOLUTE counter byte from the
+        // report (mikro.rs:415 passes `byte as i32`), not a delta - which is
+        // why treating it as one sent every line straight to its limit and
+        // made them wiggle. Recover a real delta as the wrapped difference
+        // against the previous byte, then 4 counts per pixel, matching the
+        // /4 that send_encoder_cc applies.
+        let raw = raw & 0xFF;
+        let prev = self.calib_prev[idx];
+        self.calib_prev[idx] = raw;
+        if prev < 0 {
+            return;                      // first report just seeds the value
+        }
+        let delta = ((raw - prev + 128).rem_euclid(256)) - 128;
         self.calib_accum[idx] += delta;
-        let step = (self.calib_accum[idx] / 4).clamp(-4, 4);
+        let step = (self.calib_accum[idx] / 4).clamp(-8, 8);
         if step == 0 {
             return;
         }
