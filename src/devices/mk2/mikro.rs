@@ -1155,6 +1155,39 @@ impl Maschine for Mikro {
                     display::set_pixel(&mut bits, x, display::HEIGHT - 1);
                 }
             }
+            // Layout mock inside the measured usable box (x 0..446, y 0..47):
+            // four columns under the F buttons, each with a label, a value and
+            // a position bar. Judges legibility at the real scale before the
+            // driver starts feeding it.
+            10 => {
+                const USABLE_W: usize = 447;
+                const COL_W: usize = USABLE_W / 4;
+                let labels = ["A KICK", "B SNARE", "C HAT", "D CLAP"];
+                let values = [12, 4, 96, 64];
+                for (col, label) in labels.iter().enumerate() {
+                    let x0 = col * COL_W + 2;
+                    display::draw_text(&mut bits, x0, 0, label);
+                    let val = format!("{}", values[col]);
+                    display::draw_text(&mut bits, x0, 12, &val);
+                    // Position bar: outline plus fill proportional to value.
+                    let bar_w = COL_W - 8;
+                    let (by, bh) = (26usize, 8usize);
+                    for x in 0..bar_w {
+                        display::set_pixel(&mut bits, x0 + x, by);
+                        display::set_pixel(&mut bits, x0 + x, by + bh);
+                    }
+                    for y in 0..=bh {
+                        display::set_pixel(&mut bits, x0, by + y);
+                        display::set_pixel(&mut bits, x0 + bar_w, by + y);
+                    }
+                    let fill = values[col] as usize * bar_w / 127;
+                    for x in 0..fill {
+                        for y in 2..(bh - 1) {
+                            display::set_pixel(&mut bits, x0 + x, by + y);
+                        }
+                    }
+                }
+            }
             // Two lines 2 rows apart: if they merge, rows are being doubled.
             9 => {
                 for x in 0..display::WIDTH {
