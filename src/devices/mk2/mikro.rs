@@ -665,41 +665,51 @@ impl Maschine for Mikro {
         let mut idx = 0;
         let mut idx2 = 0;
         match btn {
-            MaschineButton::F8 => idx = 1,
-            MaschineButton::F7 => idx = 2,
-            MaschineButton::F6 => idx = 3,
-            MaschineButton::F5 => idx = 4,
-            MaschineButton::F4 => idx = 5,
-            MaschineButton::F3 => idx = 6,
-            MaschineButton::F2 => idx = 7,
-            MaschineButton::F1 => idx = 8,
+            // Indices 1-16 verified on the hardware 2026-08-07 by lighting
+            // each byte on its own and reading back the physical button. The
+            // old table had F1-F8 on 1-8, which is actually the left cluster
+            // and the arrows; the F row is 9-16, in natural left-to-right
+            // order. Indices 17-31 are NOT verified - block probing showed
+            // 17-24 lands on the Scene/Pattern/Pad Mode row and 25-31 on the
+            // master section, so the names below are still guesses.
+            MaschineButton::Control => idx = 1,
+            MaschineButton::Step => idx = 2,
+            MaschineButton::Browse => idx = 3,
+            MaschineButton::Sampling => idx = 4,
+            MaschineButton::Pageleft => idx = 5,
+            MaschineButton::Pageright => idx = 6,
+            MaschineButton::All => idx = 7,
+            MaschineButton::Auto => idx = 8,
 
-            MaschineButton::Auto => idx = 9,
-            MaschineButton::All => idx = 10,
-            MaschineButton::Pageleft => idx = 11,
-            MaschineButton::Pageright => idx = 12,
+            MaschineButton::F1 => idx = 9,
+            MaschineButton::F2 => idx = 10,
+            MaschineButton::F3 => idx = 11,
+            MaschineButton::F4 => idx = 12,
+            MaschineButton::F5 => idx = 13,
+            MaschineButton::F6 => idx = 14,
+            MaschineButton::F7 => idx = 15,
+            MaschineButton::F8 => idx = 16,
 
-            MaschineButton::Sampling => idx = 13,
-
-            MaschineButton::Noterepeat => idx = 14,
-            MaschineButton::Enter => idx = 15,
-            MaschineButton::Navright => idx = 16,
-            MaschineButton::Navleft => idx = 17,
-            MaschineButton::Tempo => idx = 18,
-            MaschineButton::Swing => idx = 19,
-            MaschineButton::Volume => idx = 20,
-
-            MaschineButton::Mute => idx = 21,
-            MaschineButton::Solo => idx = 22,
-            MaschineButton::Select => idx = 23,
-            MaschineButton::Duplicate => idx = 24,
-            MaschineButton::Navigate => idx = 25,
-            MaschineButton::Padmode => idx = 26,
-            MaschineButton::Pattern => idx = 27,
-            MaschineButton::Scene => idx = 28,
-            MaschineButton::Control => idx = 29,
-            MaschineButton::Step => idx = 30,
-            MaschineButton::Browse => idx = 31,
+            // Unverified. These keep their previous relative order, shifted
+            // into the 17-31 range left free by the corrections above so no
+            // two buttons share a byte. Correct them the same way if any of
+            // them ever needs to light: send one index at a time and read
+            // back which button lights.
+            MaschineButton::Noterepeat => idx = 17,
+            MaschineButton::Enter => idx = 18,
+            MaschineButton::Navright => idx = 19,
+            MaschineButton::Navleft => idx = 20,
+            MaschineButton::Tempo => idx = 21,
+            MaschineButton::Swing => idx = 22,
+            MaschineButton::Volume => idx = 23,
+            MaschineButton::Mute => idx = 24,
+            MaschineButton::Solo => idx = 25,
+            MaschineButton::Select => idx = 26,
+            MaschineButton::Duplicate => idx = 27,
+            MaschineButton::Navigate => idx = 28,
+            MaschineButton::Padmode => idx = 29,
+            MaschineButton::Pattern => idx = 30,
+            MaschineButton::Scene => idx = 31,
 
             // Verified on the hardware 2026-08-07 by sweeping group_a..group_h
             // one at a time: the old table lit the mirrored button every time
