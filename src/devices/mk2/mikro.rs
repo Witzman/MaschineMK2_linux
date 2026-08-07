@@ -294,6 +294,8 @@ pub struct Mikro {
     calib: bool,
     calib_x: [i32; 2],
     calib_y: [i32; 2],
+    calib_accum: [i32; 4],
+    calib_dirty: bool,
     lights_dirty: bool,
 
     pads: [MaschinePad; 16],
@@ -353,6 +355,8 @@ impl Mikro {
             calib: false,
             calib_x: [0, (display::WIDTH - 1) as i32],
             calib_y: [0, (display::HEIGHT - 1) as i32],
+            calib_accum: [0; 4],
+            calib_dirty: false,
             lights_dirty: true,
 
             pads: Mikro::sixteen_maschine_pads(),
@@ -1037,13 +1041,35 @@ impl Maschine for Mikro {
     }
 
     fn calib_move(&mut self, idx: usize, delta: i32) {
-        match idx {
-            0 => self.calib_x[0] = (self.calib_x[0] + delta).clamp(0, (display::WIDTH - 1) as i32),
-            1 => self.calib_x[1] = (self.calib_x[1] + delta).clamp(0, (display::WIDTH - 1) as i32),
-            2 => self.calib_y[0] = (self.calib_y[0] + delta).clamp(0, (display::HEIGHT - 1) as i32),
-            3 => self.calib_y[1] = (self.calib_y[1] + delta).clamp(0, (display::HEIGHT - 1) as i32),
-            _ => return,
+        if idx >= 4 {
+            return;
         }
+        // encoder_step hands over a raw HID delta, not one detent - the CC
+        // path divides it by 4. Without that, one flick pinned every line to
+        // its limit immediately. Capped so a fast spin stays controllable.
+        self.calib_accum[idx] += delta;
+        let step = (self.calib_accum[idx] / 4).clamp(-4, 4);
+        if step == 0 {
+            return;
+        }
+        self.calib_accum[idx] -= step * 4;
+
+        let max_x = (display::WIDTH - 1) as i32;
+        let max_y = (display::HEIGHT - 1) as i32;
+        match idx {
+            0 => self.calib_x[0] = (self.calib_x[0] + step).clamp(0, max_x),
+            1 => self.calib_x[1] = (self.calib_x[1] + step).clamp(0, max_x),
+            2 => self.calib_y[0] = (self.calib_y[0] + step).clamp(0, max_y),
+            _ => self.calib_y[1] = (self.calib_y[1] + step).clamp(0, max_y),
+        }
+        self.calib_dirty = true;
+    }
+
+    fn calib_flush(&mut self) {
+        if !self.calib || !self.calib_dirty {
+            return;
+        }
+        self.calib_dirty = false;
         self.draw_calib();
         println!(
             "calib x1={} x2={} y1={} y2={}",

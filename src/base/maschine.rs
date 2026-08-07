@@ -330,6 +330,12 @@ pub trait Maschine {
     fn calib_set(&mut self, _on: bool) {}
     fn calib_move(&mut self, _idx: usize, _delta: i32) {}
 
+    /// Redraw the calibration lines if a move is pending. Called from the
+    /// 100ms display timer, not from calib_move: redrawing per input report
+    /// meant 16 HID writes per report on the same fd the input arrives on,
+    /// which starved the reader and set the watchdog off.
+    fn calib_flush(&mut self) {}
+
     /// Diagnostic: change how display data is framed, without a rebuild.
     /// col = header byte 1 (column offset), reverse = mirror each byte's bits,
     /// bands = how many 32-row reports to send per screen (1 or 2).

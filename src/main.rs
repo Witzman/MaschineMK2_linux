@@ -211,8 +211,9 @@ fn ev_loop(dev: &mut dyn Maschine, mhandler: &mut MHandler, dev_path: &str) {
             now = SystemTime::now();
         }
         if now_display.elapsed().unwrap() >= display_interval {
-            // Display disabled: the rendering is not functional yet and this
-            // issued ~180 writes/s of 521-byte reports. Re-enable with care.
+            // Normal rendering stays off - it issued ~180 writes/s of 521-byte
+            // reports. Calibration redraws are rate-limited to this timer.
+            dev.calib_flush();
             now_display = SystemTime::now();
         }
 
