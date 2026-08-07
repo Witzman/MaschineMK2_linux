@@ -1049,6 +1049,25 @@ impl Maschine for Mikro {
             }
             // Everything lit - proves the full addressable area.
             7 => for b in bits.iter_mut() { *b = 0xFF; },
+            // Vertical ruler: a full-width line every 8 rows plus one on the
+            // very last row. Counting the lines gives the true row count, the
+            // spacing shows whether rows are doubled, and whether the last
+            // line sits on the bottom edge shows if row HEIGHT-1 arrives.
+            8 => {
+                for y in (0..display::HEIGHT).step_by(8) {
+                    for x in 0..display::WIDTH { display::set_pixel(&mut bits, x, y); }
+                }
+                for x in 0..display::WIDTH {
+                    display::set_pixel(&mut bits, x, display::HEIGHT - 1);
+                }
+            }
+            // Two lines 2 rows apart: if they merge, rows are being doubled.
+            9 => {
+                for x in 0..display::WIDTH {
+                    display::set_pixel(&mut bits, x, 10);
+                    display::set_pixel(&mut bits, x, 12);
+                }
+            }
             // Diagonal corner to corner: catches stride and offset errors.
             _ => {
                 for y in 0..display::HEIGHT {
