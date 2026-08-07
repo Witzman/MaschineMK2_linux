@@ -1,8 +1,23 @@
 use crate::font::FONT5X8;
 
-pub const WIDTH: usize = 128;
+// Measured on the hardware 2026-08-08, not guessed. Each screen is 512x64.
+// One HID report carries 512 bytes, which at header byte 7 = 0x20 (32 rows)
+// is 16 bytes per row - a 128x32 tile. A full screen is therefore 8 reports:
+// 4 column tiles (header byte 1 = 0, 8, 16, 24, in 16-pixel units) by 2 row
+// bands (header byte 3 = 0, 32). Verified by painting tiles and watching the
+// lit area go quarter -> half -> full with no seam or gap.
+//
+// The old WIDTH of 128 is why text came out "readable but too big": it filled
+// a quarter of the panel, so everything looked magnified.
+pub const WIDTH: usize = 512;
 pub const HEIGHT: usize = 64;
-pub const STRIDE: usize = WIDTH / 8; // 16 bytes per row
+pub const STRIDE: usize = WIDTH / 8; // 64 bytes per row
+
+pub const TILE_W: usize = 128;       // pixels per report
+pub const TILE_STRIDE: usize = TILE_W / 8;
+pub const BAND_H: usize = 32;        // rows per report
+pub const TILES: usize = WIDTH / TILE_W;
+pub const BANDS: usize = HEIGHT / BAND_H;
 
 pub fn clear(bits: &mut [u8; HEIGHT * STRIDE]) {
     for b in bits.iter_mut() { *b = 0; }

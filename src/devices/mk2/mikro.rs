@@ -445,23 +445,34 @@ impl Mikro {
     }
 
     fn send_display_bits(&mut self, report_id: u8, bits: &[u8]) {
-        debug_assert_eq!(bits.len(), 1024);
-        // 512 data bytes with header byte 7 = 0x20 (32 rows) works out to
-        // 16 bytes per row, i.e. 128 pixels wide - so one report is a 128x32
-        // band and two bands cover 128x64.
+        debug_assert_eq!(bits.len(), display::HEIGHT * display::STRIDE);
+        // A 512x64 screen is sent as 8 reports: 4 column tiles by 2 row
+        // bands, each a 128x32 rectangle cut out of the framebuffer. Header
+        // byte 1 is the column offset in 16-pixel units, byte 3 the first row.
         let mut buf = [0u8; 1 + 8 + 512];
         buf[0] = report_id;
         buf[5] = 0x08;
         buf[7] = 0x20;
-        buf[1] = self.disp_col;
 
-        for band in 0..self.disp_bands.clamp(1, 2) {
-            let start = band * 512;
-            buf[3] = (band * 32) as u8;
-            for (dst, src) in buf[9..521].iter_mut().zip(&bits[start..start + 512]) {
-                *dst = if self.disp_reverse { src.reverse_bits() } else { *src };
+        for tile in 0..display::TILES {
+            for band in 0..display::BANDS.min(self.disp_bands.max(1)) {
+                buf[1] = self.disp_col + (tile * display::TILE_W / 16) as u8;
+                buf[3] = (band * display::BAND_H) as u8;
+                for row in 0..display::BAND_H {
+                    let src = (band * display::BAND_H + row) * display::STRIDE
+                        + tile * display::TILE_STRIDE;
+                    let dst = 9 + row * display::TILE_STRIDE;
+                    for i in 0..display::TILE_STRIDE {
+                        let byte = bits[src + i];
+                        buf[dst + i] = if self.disp_reverse {
+                            byte.reverse_bits()
+                        } else {
+                            byte
+                        };
+                    }
+                }
+                let _ = unistd::write(self.dev, &buf);
             }
-            let _ = unistd::write(self.dev, &buf);
         }
     }
 }
@@ -991,7 +1002,7 @@ impl Maschine for Mikro {
     fn display_opts(&mut self, col: u8, reverse: bool, bands: usize) {
         self.disp_col = col;
         self.disp_reverse = reverse;
-        self.disp_bands = bands.clamp(1, 2);
+        self.disp_bands = bands.clamp(1, display::BANDS);
         println!(
             "display opts: col={} reverse={} bands={}",
             self.disp_col, self.disp_reverse, self.disp_bands
