@@ -285,6 +285,12 @@ pub struct Mikro {
     light_buf: [u8; 49],
     light_buf2: [u8; 32],
     light_buf3: [u8; 57],
+
+    // Display framing, adjustable at runtime over OSC so the geometry can be
+    // pinned down without a rebuild per guess. See display_opts().
+    disp_col: u8,
+    disp_reverse: bool,
+    disp_bands: usize,
     lights_dirty: bool,
 
     pads: [MaschinePad; 16],
@@ -337,6 +343,10 @@ impl Mikro {
             light_buf: [0u8; 49],
             light_buf2: [0u8; 32],
             light_buf3: [0u8; 57],
+
+            disp_col: 0,
+            disp_reverse: false,
+            disp_bands: 2,
             lights_dirty: true,
 
             pads: Mikro::sixteen_maschine_pads(),
@@ -436,19 +446,23 @@ impl Mikro {
 
     fn send_display_bits(&mut self, report_id: u8, bits: &[u8]) {
         debug_assert_eq!(bits.len(), 1024);
+        // 512 data bytes with header byte 7 = 0x20 (32 rows) works out to
+        // 16 bytes per row, i.e. 128 pixels wide - so one report is a 128x32
+        // band and two bands cover 128x64.
         let mut buf = [0u8; 1 + 8 + 512];
         buf[0] = report_id;
         buf[5] = 0x08;
         buf[7] = 0x20;
-        buf[1] = 0;
+        buf[1] = self.disp_col;
 
-        buf[3] = 0;
-        buf[9..521].copy_from_slice(&bits[0..512]);
-        let _ = unistd::write(self.dev, &buf);
-
-        buf[3] = 32;
-        buf[9..521].copy_from_slice(&bits[512..1024]);
-        let _ = unistd::write(self.dev, &buf);
+        for band in 0..self.disp_bands.clamp(1, 2) {
+            let start = band * 512;
+            buf[3] = (band * 32) as u8;
+            for (dst, src) in buf[9..521].iter_mut().zip(&bits[start..start + 512]) {
+                *dst = if self.disp_reverse { src.reverse_bits() } else { *src };
+            }
+            let _ = unistd::write(self.dev, &buf);
+        }
     }
 }
 
@@ -972,6 +986,70 @@ impl Maschine for Mikro {
             screen_writer += 1;
         }
         println!("RUNNING!");
+    }
+
+    fn display_opts(&mut self, col: u8, reverse: bool, bands: usize) {
+        self.disp_col = col;
+        self.disp_reverse = reverse;
+        self.disp_bands = bands.clamp(1, 2);
+        println!(
+            "display opts: col={} reverse={} bands={}",
+            self.disp_col, self.disp_reverse, self.disp_bands
+        );
+    }
+
+    fn display_test(&mut self, pattern: usize) {
+        const SZ: usize = display::HEIGHT * display::STRIDE;
+        let mut bits = [0u8; SZ];
+
+        match pattern {
+            // A single lit row against a single lit column is the decisive
+            // test for addressing: if row 0 shows as a horizontal line the
+            // data is row-major, if it shows as a vertical line the
+            // controller is page-addressed and every byte is 8 stacked pixels.
+            1 => for x in 0..display::WIDTH { display::set_pixel(&mut bits, x, 0); },
+            2 => for y in 0..display::HEIGHT { display::set_pixel(&mut bits, 0, y); },
+            // An 8x8 block in one corner locates the origin unambiguously.
+            3 => for y in 0..8 { for x in 0..8 { display::set_pixel(&mut bits, x, y); } },
+            // Border: shows the true width and height, and whether the
+            // bottom half (the second band) arrives at all.
+            4 => {
+                for x in 0..display::WIDTH {
+                    display::set_pixel(&mut bits, x, 0);
+                    display::set_pixel(&mut bits, x, display::HEIGHT - 1);
+                }
+                for y in 0..display::HEIGHT {
+                    display::set_pixel(&mut bits, 0, y);
+                    display::set_pixel(&mut bits, display::WIDTH - 1, y);
+                }
+            }
+            // Ruler: a tick every 8px along the top, double height every 32,
+            // so a column offset or a wrap is countable.
+            5 => {
+                for x in (0..display::WIDTH).step_by(8) {
+                    let h = if x % 32 == 0 { 8 } else { 4 };
+                    for y in 0..h { display::set_pixel(&mut bits, x, y); }
+                }
+            }
+            // Text at the top-left, smallest thing that proves legibility.
+            6 => {
+                display::draw_text(&mut bits, 0, 0, "ABC 123");
+                display::draw_text(&mut bits, 0, 8, "abc xyz");
+            }
+            // Everything lit - proves the full addressable area.
+            7 => for b in bits.iter_mut() { *b = 0xFF; },
+            // Diagonal corner to corner: catches stride and offset errors.
+            _ => {
+                for y in 0..display::HEIGHT {
+                    let x = y * display::WIDTH / display::HEIGHT;
+                    display::set_pixel(&mut bits, x, y);
+                }
+            }
+        }
+
+        println!("display test pattern {}", pattern);
+        self.send_display_bits(0xE0, &bits);
+        self.send_display_bits(0xE1, &bits);
     }
 
     fn write_display(&mut self) {

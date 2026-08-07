@@ -317,6 +317,16 @@ pub trait Maschine {
     fn readable(&mut self, _: &mut dyn MaschineHandler);
 
     fn clear_screen(&mut self);
+
+    /// Diagnostic: draw a built-in calibration pattern on both screens.
+    /// Patterns are chosen to separate the unknowns one at a time - see
+    /// display_test() in the MK2 implementation for what each index draws.
+    fn display_test(&mut self, _pattern: usize) {}
+
+    /// Diagnostic: change how display data is framed, without a rebuild.
+    /// col = header byte 1 (column offset), reverse = mirror each byte's bits,
+    /// bands = how many 32-row reports to send per screen (1 or 2).
+    fn display_opts(&mut self, _col: u8, _reverse: bool, _bands: usize) {}
     fn write_lights(&mut self);
     fn write_screen(&mut self);
     fn write_display(&mut self) {}
