@@ -452,6 +452,20 @@ impl Mikro {
     }
 }
 
+fn group_slot(btn: MaschineButton) -> Option<usize> {
+    match btn {
+        MaschineButton::GroupA => Some(0),
+        MaschineButton::GroupB => Some(1),
+        MaschineButton::GroupC => Some(2),
+        MaschineButton::GroupD => Some(3),
+        MaschineButton::GroupE => Some(4),
+        MaschineButton::GroupF => Some(5),
+        MaschineButton::GroupG => Some(6),
+        MaschineButton::GroupH => Some(7),
+        _ => None,
+    }
+}
+
 fn set_rgb_light(rgb: &mut [u8], color: u32, brightness: f32) {
     let brightness = brightness * 0.5;
 
@@ -675,8 +689,27 @@ impl Maschine for Mikro {
         return self.speed
     }
 
-    fn set_button_light(&mut self, btn: MaschineButton, _color: u32, brightness: f32) {
+    fn set_button_light(&mut self, btn: MaschineButton, color: u32, brightness: f32) {
         self.lights_dirty = true;
+
+        // The group buttons are full RGB, three contiguous bytes each. Mapped
+        // on the hardware 2026-08-07 with /maschine/rawled: lighting a single
+        // byte shows which channel it drives, so the colour it produces gives
+        // its position in the triplet (red = first, green = middle, blue =
+        // last). Everything else on the device is one byte.
+        if let Some(slot) = group_slot(btn) {
+            const GROUP_RGB_START: [usize; 8] = [1, 7, 13, 22, 25, 34, 37, 46];
+            let start = GROUP_RGB_START[slot];
+            let level = brightness.clamp(0.0, 1.0);
+            let rgb = &mut self.light_buf3[start..(start + 3)];
+            // Deliberately not set_rgb_light(): that halves brightness, which
+            // callers of this method do not expect.
+            rgb[0] = (level * (((color >> 16) & 0xFF) as f32)) as u8;
+            rgb[1] = (level * (((color >> 8) & 0xFF) as f32)) as u8;
+            rgb[2] = (level * ((color & 0xFF) as f32)) as u8;
+            return;
+        }
+
         let mut idx = 0;
         let mut idx2 = 0;
         match btn {
@@ -726,18 +759,8 @@ impl Maschine for Mikro {
             MaschineButton::Pattern => idx = 30,
             MaschineButton::Scene => idx = 31,
 
-            // Verified on the hardware 2026-08-07 by sweeping group_a..group_h
-            // one at a time: the old table lit the mirrored button every time
-            // (group_a lit physical H, group_h lit physical A, all 8 reversed).
-            MaschineButton::GroupA => idx2 = 2,
-            MaschineButton::GroupB => idx2 = 9,
-            MaschineButton::GroupC => idx2 = 14,
-            MaschineButton::GroupD => idx2 = 22,
-            MaschineButton::GroupE => idx2 = 26,
-            MaschineButton::GroupF => idx2 = 34,
-            MaschineButton::GroupG => idx2 = 39,
-            MaschineButton::GroupH => idx2 = 48,
-            MaschineButton::Shift => idx2 = 47,
+            // Group A-H are handled above as RGB triplets, not here.
+            MaschineButton::Shift => idx2 = 55,
             MaschineButton::Erase => idx2 = 56,
             MaschineButton::Rec => idx2 = 54,
             MaschineButton::Play => idx2 = 53,
