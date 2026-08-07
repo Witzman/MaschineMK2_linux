@@ -291,6 +291,9 @@ pub struct Mikro {
     disp_col: u8,
     disp_reverse: bool,
     disp_bands: usize,
+    calib: bool,
+    calib_x: [i32; 2],
+    calib_y: [i32; 2],
     lights_dirty: bool,
 
     pads: [MaschinePad; 16],
@@ -347,6 +350,9 @@ impl Mikro {
             disp_col: 0,
             disp_reverse: false,
             disp_bands: 2,
+            calib: false,
+            calib_x: [0, (display::WIDTH - 1) as i32],
+            calib_y: [0, (display::HEIGHT - 1) as i32],
             lights_dirty: true,
 
             pads: Mikro::sixteen_maschine_pads(),
@@ -442,6 +448,23 @@ impl Mikro {
                 _ => {}
             }
         }
+    }
+
+    fn draw_calib(&mut self) {
+        const SZ: usize = display::HEIGHT * display::STRIDE;
+        let mut bits = [0u8; SZ];
+        for &x in self.calib_x.iter() {
+            for y in 0..display::HEIGHT {
+                display::set_pixel(&mut bits, x as usize, y);
+            }
+        }
+        for &y in self.calib_y.iter() {
+            for x in 0..display::WIDTH {
+                display::set_pixel(&mut bits, x, y as usize);
+            }
+        }
+        self.send_display_bits(0xE0, &bits);
+        self.send_display_bits(0xE1, &bits);
     }
 
     fn send_display_bits(&mut self, report_id: u8, bits: &[u8]) {
@@ -997,6 +1020,35 @@ impl Maschine for Mikro {
             screen_writer += 1;
         }
         println!("RUNNING!");
+    }
+
+    fn calib_active(&self) -> bool {
+        self.calib
+    }
+
+    fn calib_set(&mut self, on: bool) {
+        self.calib = on;
+        if on {
+            self.calib_x = [0, (display::WIDTH - 1) as i32];
+            self.calib_y = [0, (display::HEIGHT - 1) as i32];
+            self.draw_calib();
+        }
+        println!("calibration {}", if on { "ON" } else { "OFF" });
+    }
+
+    fn calib_move(&mut self, idx: usize, delta: i32) {
+        match idx {
+            0 => self.calib_x[0] = (self.calib_x[0] + delta).clamp(0, (display::WIDTH - 1) as i32),
+            1 => self.calib_x[1] = (self.calib_x[1] + delta).clamp(0, (display::WIDTH - 1) as i32),
+            2 => self.calib_y[0] = (self.calib_y[0] + delta).clamp(0, (display::HEIGHT - 1) as i32),
+            3 => self.calib_y[1] = (self.calib_y[1] + delta).clamp(0, (display::HEIGHT - 1) as i32),
+            _ => return,
+        }
+        self.draw_calib();
+        println!(
+            "calib x1={} x2={} y1={} y2={}",
+            self.calib_x[0], self.calib_x[1], self.calib_y[0], self.calib_y[1]
+        );
     }
 
     fn display_opts(&mut self, col: u8, reverse: bool, bands: usize) {

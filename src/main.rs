@@ -705,6 +705,10 @@ impl<'a> MHandler<'a> {
                     maschine.display_opts(col as u8, reverse != 0, bands as usize);
                 }
             }
+        } else if msg.path.starts_with("/maschine/display/calib") {
+            if let [osc::Argument::i(on)] = msg.arguments[..] {
+                maschine.calib_set(on != 0);
+            }
         } else if msg.path.starts_with("/maschine/display/clear") {
             maschine.clear_screen();
         } else if msg.path.starts_with("/maschine/rawled") {
@@ -1337,6 +1341,10 @@ impl<'a> MaschineHandler for MHandler<'a> {
     }
 
     fn encoder_step(&mut self, maschine: &mut dyn Maschine, idx: usize, state: i32) {
+        if maschine.calib_active() {
+            maschine.calib_move(idx, state);
+            return;
+        }
         if maschine.get_padmode() == 2 {
             if let Some(sel) = maschine.get_selected_step() {
                 match idx {

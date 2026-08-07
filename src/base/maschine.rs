@@ -323,6 +323,13 @@ pub trait Maschine {
     /// display_test() in the MK2 implementation for what each index draws.
     fn display_test(&mut self, _pattern: usize) {}
 
+    /// Interactive display calibration. With it on, encoders 1-4 drag two
+    /// vertical and two horizontal lines; dialling each to the edge of the
+    /// visible area reads the true framebuffer bounds straight off the panel.
+    fn calib_active(&self) -> bool { false }
+    fn calib_set(&mut self, _on: bool) {}
+    fn calib_move(&mut self, _idx: usize, _delta: i32) {}
+
     /// Diagnostic: change how display data is framed, without a rebuild.
     /// col = header byte 1 (column offset), reverse = mirror each byte's bits,
     /// bands = how many 32-row reports to send per screen (1 or 2).
