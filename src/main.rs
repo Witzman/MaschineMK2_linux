@@ -183,6 +183,7 @@ fn ev_loop(dev: &mut dyn Maschine, mhandler: &mut MHandler, dev_path: &str) {
                         MaschineConfig {
                             pad_notes: mhandler.pad_notes,
                             encoder_ccs: mhandler.encoder_ccs,
+                            external_pad_leds: mhandler.external_pad_leds,
                         }.save();
                     }
                 }
@@ -192,6 +193,7 @@ fn ev_loop(dev: &mut dyn Maschine, mhandler: &mut MHandler, dev_path: &str) {
                         MaschineConfig {
                             pad_notes: mhandler.pad_notes,
                             encoder_ccs: mhandler.encoder_ccs,
+                            external_pad_leds: mhandler.external_pad_leds,
                         }.save();
                     }
                 }
@@ -304,6 +306,7 @@ struct MHandler<'a> {
 
     pad_notes: [u8; 16],
     encoder_ccs: [u16; 8],
+    external_pad_leds: bool,
 }
 
 fn osc_button_to_btn_map(osc_button: &str) -> Option<MaschineButton> {
@@ -1263,7 +1266,9 @@ impl<'a> MaschineHandler for MHandler<'a> {
         } else {
             self.seq_port.send_message(&msg).unwrap();
             self.seq_handle.drain_output();
-            maschine.set_pad_light(pad_idx, self.pad_color(), pressure.sqrt());
+            if !self.external_pad_leds {
+                maschine.set_pad_light(pad_idx, self.pad_color(), pressure.sqrt());
+            }
             let _ = self.event_tx.send(DeviceEvent::PadPressed {
                 pad: pad_idx,
                 velocity: self.pressure_to_vel(pressure),
@@ -1287,7 +1292,9 @@ impl<'a> MaschineHandler for MHandler<'a> {
         self.seq_port.send_message(&msg).unwrap();
         self.seq_handle.drain_output();
 
-        maschine.set_pad_light(pad_idx, self.pad_color(), pressure.sqrt());
+        if !self.external_pad_leds {
+            maschine.set_pad_light(pad_idx, self.pad_color(), pressure.sqrt());
+        }
     }
 
     fn pad_released(&mut self, maschine: &mut dyn Maschine, pad_idx: usize) {
@@ -1296,7 +1303,9 @@ impl<'a> MaschineHandler for MHandler<'a> {
             let msg = Message::NoteOff(Ch1, midi_note, 0);
             self.seq_port.send_message(&msg).unwrap();
             self.seq_handle.drain_output();
-            maschine.set_pad_light(pad_idx, self.pad_color(), PAD_RELEASED_BRIGHTNESS);
+            if !self.external_pad_leds {
+                maschine.set_pad_light(pad_idx, self.pad_color(), PAD_RELEASED_BRIGHTNESS);
+            }
             let _ = self.event_tx.send(DeviceEvent::PadReleased { pad: pad_idx });
         };
     }
@@ -1432,13 +1441,16 @@ fn main() {
 
         pad_notes: cfg.pad_notes,
         encoder_ccs: cfg.encoder_ccs,
+        external_pad_leds: cfg.external_pad_leds,
     };
 
     // Display disabled, see write_display() above.
     // dev.clear_screen();
 
-    for i in 0..16 {
-        dev.set_pad_light(i, handler.pad_color(), PAD_RELEASED_BRIGHTNESS);
+    if !handler.external_pad_leds {
+        for i in 0..16 {
+            dev.set_pad_light(i, handler.pad_color(), PAD_RELEASED_BRIGHTNESS);
+        }
     }
 
     ev_loop(&mut dev, &mut handler, &args[1]);
