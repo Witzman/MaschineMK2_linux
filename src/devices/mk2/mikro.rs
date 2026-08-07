@@ -487,6 +487,21 @@ impl Maschine for Mikro {
         self.lights_dirty = false;
     }
 
+    fn set_raw_light(&mut self, buffer: usize, index: usize, value: u8) {
+        // Byte 0 of every report is its report id, so index 0 is refused.
+        let target = match buffer {
+            1 => &mut self.light_buf[..],
+            2 => &mut self.light_buf2[..],
+            3 => &mut self.light_buf3[..],
+            _ => return,
+        };
+        if index == 0 || index >= target.len() {
+            return;
+        }
+        target[index] = value;
+        self.lights_dirty = true;
+    }
+
     fn set_pad_light(&mut self, pad: usize, color: u32, brightness: f32) {
         self.lights_dirty = true;
         // LED report is display-order (top-left first); input is bottom-up row-major.

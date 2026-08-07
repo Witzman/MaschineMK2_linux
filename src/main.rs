@@ -691,6 +691,16 @@ impl<'a> MHandler<'a> {
 
                 _ => return,
             }
+        } else if msg.path.starts_with("/maschine/rawled") {
+            // Diagnostic path for mapping LED report layouts: buffer, index,
+            // value. See Maschine::set_raw_light.
+            if let [osc::Argument::i(buffer), osc::Argument::i(index), osc::Argument::i(value)] =
+                msg.arguments[..]
+            {
+                if buffer >= 0 && index >= 0 && (0..=255).contains(&value) {
+                    maschine.set_raw_light(buffer as usize, index as usize, value as u8);
+                }
+            }
         } else if msg.path.starts_with("/maschine/midi_note_base") {
             match msg.arguments.len() {
                 1 => {

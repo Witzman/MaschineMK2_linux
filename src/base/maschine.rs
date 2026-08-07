@@ -265,6 +265,14 @@ pub trait Maschine {
     fn set_pad_light(&mut self, pad_idx: usize, color: u32, brightness: f32);
     fn set_button_light(&mut self, btn: MaschineButton, color: u32, brightness: f32);
 
+    /// Diagnostic: write one raw byte of an LED report, bypassing every name
+    /// table. This is how the button LED layout gets mapped - light a single
+    /// byte and look at the device. `buffer` selects the report: 1 = pads
+    /// (0x80), 2 = buttons (0x82), 3 = group/transport (0x81). Out-of-range
+    /// arguments are ignored. Default is a no-op so other devices need not
+    /// implement it.
+    fn set_raw_light(&mut self, _buffer: usize, _index: usize, _value: u8) {}
+
     fn set_mod(&mut self, state: usize);
     fn get_mod(&self) -> usize;
 
