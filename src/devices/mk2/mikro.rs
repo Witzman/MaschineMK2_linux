@@ -701,14 +701,17 @@ impl Maschine for Mikro {
             MaschineButton::Step => idx = 30,
             MaschineButton::Browse => idx = 31,
 
-            MaschineButton::GroupH => idx2 = 2,
-            MaschineButton::GroupG => idx2 = 9,
-            MaschineButton::GroupF => idx2 = 14,
-            MaschineButton::GroupE => idx2 = 22,
-            MaschineButton::GroupD => idx2 = 26,
-            MaschineButton::GroupC => idx2 = 34,
-            MaschineButton::GroupB => idx2 = 39,
-            MaschineButton::GroupA => idx2 = 48,
+            // Verified on the hardware 2026-08-07 by sweeping group_a..group_h
+            // one at a time: the old table lit the mirrored button every time
+            // (group_a lit physical H, group_h lit physical A, all 8 reversed).
+            MaschineButton::GroupA => idx2 = 2,
+            MaschineButton::GroupB => idx2 = 9,
+            MaschineButton::GroupC => idx2 = 14,
+            MaschineButton::GroupD => idx2 = 22,
+            MaschineButton::GroupE => idx2 = 26,
+            MaschineButton::GroupF => idx2 = 34,
+            MaschineButton::GroupG => idx2 = 39,
+            MaschineButton::GroupH => idx2 = 48,
             MaschineButton::Shift => idx2 = 47,
             MaschineButton::Erase => idx2 = 56,
             MaschineButton::Rec => idx2 = 54,
@@ -720,11 +723,16 @@ impl Maschine for Mikro {
 
             _ => return,
         };
+        // Every caller passes brightness on 0.0..=1.0 (see main.rs:731, which
+        // sends 1.0 and 0.05), but this used to store the float straight into
+        // the byte: 1.0 became LED byte 1 of 255 and anything below 1.0 became
+        // 0. That is why a "full brightness" button looked nearly dead and a
+        // "half brightness" one did not light at all. Scale to the byte range.
+        let level = (brightness.clamp(0.0, 1.0) * 255.0) as u8;
         if idx != 0 {
-            //println!("light this {}, brightness {}", idx, brightness);
-            self.light_buf2[idx] = brightness as u8;
+            self.light_buf2[idx] = level;
         } else {
-            self.light_buf3[idx2] = brightness as u8;
+            self.light_buf3[idx2] = level;
         }
     }
 
