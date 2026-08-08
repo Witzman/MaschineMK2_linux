@@ -304,6 +304,9 @@ pub struct Mikro {
     // precaution.
     disp_fb: [[u8; display::HEIGHT * display::STRIDE]; 2],
     disp_fb_dirty: bool,
+    // Diagnostic: skip the logical->transfer row mapping so a probe can write
+    // transfer rows directly. Off in normal use.
+    disp_raw: bool,
     lights_dirty: bool,
 
     pads: [MaschinePad; 16],
@@ -368,6 +371,7 @@ impl Mikro {
             calib_dirty: false,
             disp_fb: [[0u8; display::HEIGHT * display::STRIDE]; 2],
             disp_fb_dirty: false,
+            disp_raw: false,
             lights_dirty: true,
 
             pads: Mikro::sixteen_maschine_pads(),
@@ -1109,6 +1113,11 @@ impl Maschine for Mikro {
     // all into a per-screen framebuffer, pushed by flush on the display timer.
     // Screen 0 is the left panel (report 0xE0), screen 1 the right (0xE1).
 
+    fn display_fb_raw(&mut self, on: bool) {
+        self.disp_raw = on;
+        self.disp_fb_dirty = true;
+    }
+
     fn display_fb_clear(&mut self, screen: usize) {
         if screen > 1 { return; }
         for b in self.disp_fb[screen].iter_mut() { *b = 0; }
@@ -1168,6 +1177,15 @@ impl Maschine for Mikro {
     fn display_fb_flush(&mut self) {
         if !self.disp_fb_dirty { return; }
         self.disp_fb_dirty = false;
+        if self.disp_raw {
+            // Probing mode: the buffer IS the transfer buffer, no row mapping,
+            // so a test can address transfer rows directly.
+            let left = self.disp_fb[0];
+            let right = self.disp_fb[1];
+            self.send_display_bits(0xE0, &left);
+            self.send_display_bits(0xE1, &right);
+            return;
+        }
         for screen in 0..2 {
             let mut out = [0u8; display::HEIGHT * display::STRIDE];
             for lrow in 0..display::LOGICAL_H {

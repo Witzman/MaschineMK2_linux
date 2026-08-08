@@ -336,6 +336,9 @@ pub trait Maschine {
         &mut self, _screen: usize, _x: usize, _y: usize, _w: usize, _h: usize, _style: usize,
     ) {}
     fn display_fb_flush(&mut self) {}
+    /// Diagnostic: address transfer rows directly, bypassing the logical
+    /// canvas mapping.
+    fn display_fb_raw(&mut self, _on: bool) {}
 
     /// Interactive display calibration. With it on, encoders 1-4 drag two
     /// vertical and two horizontal lines; dialling each to the edge of the

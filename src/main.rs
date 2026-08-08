@@ -724,6 +724,10 @@ impl<'a> MHandler<'a> {
                     maschine.display_fb_clear(screen as usize);
                 }
             }
+        } else if msg.path.starts_with("/maschine/display/raw") {
+            if let [osc::Argument::i(on)] = msg.arguments[..] {
+                maschine.display_fb_raw(on != 0);
+            }
         } else if msg.path.starts_with("/maschine/display/text") {
             if let [
                 osc::Argument::i(screen), osc::Argument::i(x), osc::Argument::i(y),
