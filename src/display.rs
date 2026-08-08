@@ -1,11 +1,7 @@
 use crate::font::FONT5X8;
 
-// Measured on the hardware 2026-08-08, not guessed. Each screen is 512x64.
-// One HID report carries 512 bytes, which at header byte 7 = 0x20 (32 rows)
-// is 16 bytes per row - a 128x32 tile. A full screen is therefore 8 reports:
-// 4 column tiles (header byte 1 = 0, 8, 16, 24, in 16-pixel units) by 2 row
-// bands (header byte 3 = 0, 32). Verified by painting tiles and watching the
-// lit area go quarter -> half -> full with no seam or gap.
+// Measured on the hardware, not guessed. Each screen is 512x64, addressed
+// 1:1 - see TILE_W below for how a report maps onto it.
 //
 // The old WIDTH of 128 is why text came out "readable but too big": it filled
 // a quarter of the panel, so everything looked magnified.
@@ -13,24 +9,27 @@ pub const WIDTH: usize = 512;
 pub const HEIGHT: usize = 64;
 pub const STRIDE: usize = WIDTH / 8; // 64 bytes per row
 
-// The panel does not show all 64 transfer rows. Measured 2026-08-08 by
-// drawing one row at a time and reading the screen: transfer rows 0-15 land on
-// physical rows 0-31, rows 32-47 land on physical rows 32-63, and rows 16-31
-// and 48-63 are dropped. Every row therefore renders 2 px tall, which makes
-// the real drawing surface 512x32.
+// With the tile geometry corrected the canvas is the panel: 512x64, one
+// logical row per physical row. The mapping is kept as an identity hook
+// because the earlier wrong geometry made it look as though rows were being
+// dropped, and a future panel variant may genuinely need one.
+pub const LOGICAL_H: usize = HEIGHT;
+
+pub fn logical_row(lrow: usize) -> usize { lrow }
+
+// A report carries a 64-pixel-wide column strip over the FULL height: 8 bytes
+// per row, 64 rows, 512 bytes. Measured 2026-08-09 from a text wrap - a word
+// drawn from x=20 had everything past x=64 reappear at x=0 of the same line,
+// which is what happens when the panel reads 8-byte rows out of a buffer cut
+// into 16-byte ones.
 //
-// Layouts address that LOGICAL canvas; logical_row() maps it to the transfer
-// row on flush. Ignoring this is what made the first layout mock unreadable:
-// an 8-px glyph at y=12 lost everything from row 16 upward.
-pub const LOGICAL_H: usize = 32;
-
-pub fn logical_row(lrow: usize) -> usize {
-    if lrow < 16 { lrow } else { lrow + 16 }
-}
-
-pub const TILE_W: usize = 128;       // pixels per report
+// The old cut (128x32 tiles, 16 bytes per row) fed each 128-px row to the
+// panel as TWO of its 64-px rows, which is what produced every earlier
+// mystery at once: rows looked 2 px tall, half the transfer rows looked
+// discarded, and text overlapped itself.
+pub const TILE_W: usize = 64;        // pixels per report
 pub const TILE_STRIDE: usize = TILE_W / 8;
-pub const BAND_H: usize = 32;        // rows per report
+pub const BAND_H: usize = 64;        // rows per report - the full height
 pub const TILES: usize = WIDTH / TILE_W;
 pub const BANDS: usize = HEIGHT / BAND_H;
 
@@ -82,13 +81,10 @@ pub fn clear_pixel(bits: &mut [u8; HEIGHT * STRIDE], x: usize, y: usize) {
     bits[y * STRIDE + x / 8] &= !(0x80 >> (x % 8));
 }
 
-// A logical row is two physical pixels tall but one pixel wide, so a glyph
-// drawn 1:1 comes out at half its intended aspect - 5 wide by 16 tall, which
-// on the panel reads as a vertical smear rather than a letter. Every glyph is
-// therefore drawn at twice the horizontal scale, which the row doubling then
-// squares up: scale 1 is 10x8 logical = 10x16 physical, the proportions the
-// 5x8 font was cut for.
-pub const X_SCALE: usize = 2;
+// Glyphs are square on the panel now that rows map 1:1, so no horizontal
+// compensation is needed. Kept as a named constant because getting this wrong
+// once already cost a full round of unreadable screens.
+pub const X_SCALE: usize = 1;
 
 /// Character cell width at a given scale, gap included.
 pub fn char_w(scale: usize) -> usize { 6 * X_SCALE * scale.max(1) }

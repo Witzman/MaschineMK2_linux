@@ -488,8 +488,8 @@ impl Mikro {
 
     fn send_display_bits(&mut self, report_id: u8, bits: &[u8]) {
         debug_assert_eq!(bits.len(), display::HEIGHT * display::STRIDE);
-        // A 512x64 screen is sent as 8 reports: 4 column tiles by 2 row
-        // bands, each a 128x32 rectangle cut out of the framebuffer. Header
+        // A 512x64 screen is sent as 8 reports, one per 64-pixel column strip
+        // over the full height: 8 bytes per row, 64 rows, 512 bytes. Header
         // byte 1 is the column offset in 16-pixel units, byte 3 the first row.
         let mut buf = [0u8; 1 + 8 + 512];
         buf[0] = report_id;
