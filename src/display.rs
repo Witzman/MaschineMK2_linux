@@ -29,7 +29,11 @@ pub fn logical_row(lrow: usize) -> usize { lrow }
 // discarded, and text overlapped itself.
 pub const TILE_W: usize = 64;        // pixels per report
 pub const TILE_STRIDE: usize = TILE_W / 8;
-pub const BAND_H: usize = 64;        // rows per report - the full height
+// Header byte 7 is 0x20: a report carries 32 rows, so each 64-px strip needs
+// two of them - byte 3 = 0 and 32. Sending one 64-row report per strip left
+// rows 32-63 holding whatever was on the panel before, which is exactly how
+// stale text survived a full redraw.
+pub const BAND_H: usize = 32;        // rows per report
 pub const TILES: usize = WIDTH / TILE_W;
 pub const BANDS: usize = HEIGHT / BAND_H;
 
