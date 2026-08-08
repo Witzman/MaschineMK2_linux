@@ -17,17 +17,17 @@ pub const LOGICAL_H: usize = HEIGHT;
 
 pub fn logical_row(lrow: usize) -> usize { lrow }
 
-// A report carries a 64-pixel-wide column strip over the FULL height: 8 bytes
-// per row, 64 rows, 512 bytes. Measured 2026-08-09 from a text wrap - a word
-// drawn from x=20 had everything past x=64 reappear at x=0 of the same line,
-// which is what happens when the panel reads 8-byte rows out of a buffer cut
-// into 16-byte ones.
+// A report is a 128x32 tile: the panel reads 16 bytes per row, 32 rows,
+// 512 bytes. Confirmed the hard way - feeding it 8-byte rows made every pair
+// of our rows land in one panel row, so text drawn past x=64 reappeared at
+// x=0 (a "wrap") and only half of each strip survived. 4-byte rows fragmented
+// it further still.
 //
-// The old cut (128x32 tiles, 16 bytes per row) fed each 128-px row to the
-// panel as TWO of its 64-px rows, which is what produced every earlier
-// mystery at once: rows looked 2 px tall, half the transfer rows looked
-// discarded, and text overlapped itself.
-pub const TILE_W: usize = 64;        // pixels per report
+// A full screen is therefore 4 column tiles (byte 1 = 0, 8, 16, 24 in 16-px
+// units) by 2 row bands (byte 3 = 0, 32). BOTH bands must be sent: byte 7 is
+// 0x20, so one report only ever covers 32 rows, and sending a single band per
+// tile leaves rows 32-63 holding whatever was on the panel before.
+pub const TILE_W: usize = 128;       // pixels per report
 pub const TILE_STRIDE: usize = TILE_W / 8;
 // Header byte 7 is 0x20: a report carries 32 rows, so each 64-px strip needs
 // two of them - byte 3 = 0 and 32. Sending one 64-row report per strip left
@@ -225,5 +225,26 @@ mod tests {
     fn draw_text_does_not_overflow() {
         let mut bits = [0u8; HEIGHT * STRIDE];
         draw_text(&mut bits, 0, 0, "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789");
+    }
+}
+
+#[cfg(test)]
+mod render_dump {
+    use super::*;
+
+    /// Renders text and prints it as ASCII art so the glyph layout can be read
+    /// without a panel in the loop.
+    #[test]
+    fn dump_text_layout() {
+        let mut bits = [0u8; HEIGHT * STRIDE];
+        draw_text_scaled(&mut bits, 0, 0, "AB C", 1);
+        for y in 0..8 {
+            let mut line = String::new();
+            for x in 0..40 {
+                line.push(if bits[y * STRIDE + x / 8] & (0x80 >> (x % 8)) != 0 { '#' } else { '.' });
+            }
+            println!("{}", line);
+        }
+        println!("char_w(1)={} text_w(\"AB C\",1)={}", char_w(1), text_w("AB C", 1));
     }
 }
