@@ -323,6 +323,20 @@ pub trait Maschine {
     /// display_test() in the MK2 implementation for what each index draws.
     fn display_test(&mut self, _pattern: usize) {}
 
+    /// Screen framebuffer drawing, driven over OSC so the layout lives in the
+    /// Zynthian driver rather than being hardcoded here. Screen 0 is the left
+    /// panel, 1 the right. Nothing reaches the hardware until display_fb_flush
+    /// runs on the display timer.
+    fn display_fb_clear(&mut self, _screen: usize) {}
+    fn display_fb_text(
+        &mut self, _screen: usize, _x: usize, _y: usize, _scale: usize, _invert: bool, _text: &str,
+    ) {}
+    /// style: 0 outline, 1 filled, 2 dashed outline, 3 dotted rule, 4 invert.
+    fn display_fb_rect(
+        &mut self, _screen: usize, _x: usize, _y: usize, _w: usize, _h: usize, _style: usize,
+    ) {}
+    fn display_fb_flush(&mut self) {}
+
     /// Interactive display calibration. With it on, encoders 1-4 drag two
     /// vertical and two horizontal lines; dialling each to the edge of the
     /// visible area reads the true framebuffer bounds straight off the panel.

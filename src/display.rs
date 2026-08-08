@@ -53,6 +53,106 @@ pub fn draw_text(bits: &mut [u8; HEIGHT * STRIDE], px: usize, py: usize, text: &
     }
 }
 
+// --- primitives for the rig's screen layout ---------------------------------
+//
+// The reference is Maschine's own screen: boxed labels along the top under the
+// buttons, a rule, then one column per encoder with a small caps name above a
+// double-height value. That needs three things the original font code had no
+// answer for - scaled text, filled/outlined/dashed boxes, and inversion for
+// the selected item - so they live here rather than being open-coded per
+// layout.
+
+pub fn clear_pixel(bits: &mut [u8; HEIGHT * STRIDE], x: usize, y: usize) {
+    if x >= WIDTH || y >= HEIGHT { return; }
+    bits[y * STRIDE + x / 8] &= !(0x80 >> (x % 8));
+}
+
+/// Character cell width at a given scale, gap included.
+pub fn char_w(scale: usize) -> usize { 6 * scale.max(1) }
+
+/// Pixel width a string occupies at a given scale, trailing gap excluded.
+pub fn text_w(text: &str, scale: usize) -> usize {
+    let n = text.len();
+    if n == 0 { 0 } else { n * char_w(scale) - scale.max(1) }
+}
+
+pub fn draw_char_scaled(bits: &mut [u8; HEIGHT * STRIDE], px: usize, py: usize, c: u8, scale: usize) {
+    let s = scale.max(1);
+    if s == 1 { return draw_char(bits, px, py, c); }
+    let idx = match c { 32..=127 => (c - 32) as usize, _ => 0 };
+    let glyph = &FONT5X8[idx];
+    for col in 0..5 {
+        let col_byte = glyph[col];
+        for row in 0..8 {
+            if (col_byte >> row) & 1 == 1 {
+                for dy in 0..s {
+                    for dx in 0..s {
+                        set_pixel(bits, px + col * s + dx, py + row * s + dy);
+                    }
+                }
+            }
+        }
+    }
+}
+
+pub fn draw_text_scaled(bits: &mut [u8; HEIGHT * STRIDE], px: usize, py: usize, text: &str, scale: usize) {
+    let s = scale.max(1);
+    let mut x = px;
+    for c in text.bytes() {
+        if x + 5 * s > WIDTH { break; }
+        draw_char_scaled(bits, x, py, c, s);
+        x += char_w(s);
+    }
+}
+
+pub fn hline(bits: &mut [u8; HEIGHT * STRIDE], x: usize, y: usize, w: usize) {
+    for i in 0..w { set_pixel(bits, x + i, y); }
+}
+
+pub fn vline(bits: &mut [u8; HEIGHT * STRIDE], x: usize, y: usize, h: usize) {
+    for i in 0..h { set_pixel(bits, x, y + i); }
+}
+
+/// Every other pixel - the separator Maschine draws under its tab row.
+pub fn dotted_hline(bits: &mut [u8; HEIGHT * STRIDE], x: usize, y: usize, w: usize) {
+    let mut i = 0;
+    while i < w { set_pixel(bits, x + i, y); i += 2; }
+}
+
+pub fn fill_rect(bits: &mut [u8; HEIGHT * STRIDE], x: usize, y: usize, w: usize, h: usize) {
+    for dy in 0..h { for dx in 0..w { set_pixel(bits, x + dx, y + dy); } }
+}
+
+pub fn rect(bits: &mut [u8; HEIGHT * STRIDE], x: usize, y: usize, w: usize, h: usize) {
+    if w == 0 || h == 0 { return; }
+    hline(bits, x, y, w);
+    hline(bits, x, y + h - 1, w);
+    vline(bits, x, y, h);
+    vline(bits, x + w - 1, y, h);
+}
+
+/// Outline drawn every other pixel - Maschine's "available but not selected"
+/// box, distinct from a solid one at a glance.
+pub fn dashed_rect(bits: &mut [u8; HEIGHT * STRIDE], x: usize, y: usize, w: usize, h: usize) {
+    if w == 0 || h == 0 { return; }
+    let mut i = 0;
+    while i < w { set_pixel(bits, x + i, y); set_pixel(bits, x + i, y + h - 1); i += 2; }
+    let mut j = 0;
+    while j < h { set_pixel(bits, x, y + j); set_pixel(bits, x + w - 1, y + j); j += 2; }
+}
+
+/// Swap lit and unlit inside a box. Drawing text first and inverting after is
+/// how a label becomes dark-on-light without a second draw path.
+pub fn invert_rect(bits: &mut [u8; HEIGHT * STRIDE], x: usize, y: usize, w: usize, h: usize) {
+    for dy in 0..h {
+        for dx in 0..w {
+            let (px, py) = (x + dx, y + dy);
+            if px >= WIDTH || py >= HEIGHT { continue; }
+            bits[py * STRIDE + px / 8] ^= 0x80 >> (px % 8);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

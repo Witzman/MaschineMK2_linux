@@ -297,6 +297,13 @@ pub struct Mikro {
     calib_accum: [i32; 4],
     calib_prev: [i32; 4],
     calib_dirty: bool,
+    // One framebuffer per screen, drawn into over OSC and pushed to the
+    // hardware only on the 100 ms display timer. Writing per command would put
+    // 16 HID writes on the same fd the input arrives on, which starves the
+    // reader and trips the hidraw watchdog - that is a measured failure, not a
+    // precaution.
+    disp_fb: [[u8; display::HEIGHT * display::STRIDE]; 2],
+    disp_fb_dirty: bool,
     lights_dirty: bool,
 
     pads: [MaschinePad; 16],
@@ -359,6 +366,8 @@ impl Mikro {
             calib_accum: [0; 4],
             calib_prev: [-1; 4],
             calib_dirty: false,
+            disp_fb: [[0u8; display::HEIGHT * display::STRIDE]; 2],
+            disp_fb_dirty: false,
             lights_dirty: true,
 
             pads: Mikro::sixteen_maschine_pads(),
@@ -1091,6 +1100,65 @@ impl Maschine for Mikro {
             "calib x1={} x2={} y1={} y2={}",
             self.calib_x[0], self.calib_x[1], self.calib_y[0], self.calib_y[1]
         );
+    }
+
+    // --- OSC-driven screen drawing ------------------------------------------
+    //
+    // The driver owns what the screens say, so the daemon exposes primitives
+    // rather than layouts: clear, text (with scale and inversion) and boxes,
+    // all into a per-screen framebuffer, pushed by flush on the display timer.
+    // Screen 0 is the left panel (report 0xE0), screen 1 the right (0xE1).
+
+    fn display_fb_clear(&mut self, screen: usize) {
+        if screen > 1 { return; }
+        for b in self.disp_fb[screen].iter_mut() { *b = 0; }
+        self.disp_fb_dirty = true;
+    }
+
+    /// Text at `scale` (1 = 5x8, 2 = 10x16). `invert` swaps the box behind it,
+    /// giving the dark-on-light label Maschine uses for the selected item.
+    fn display_fb_text(
+        &mut self, screen: usize, x: usize, y: usize, scale: usize, invert: bool, text: &str,
+    ) {
+        if screen > 1 { return; }
+        let fb = &mut self.disp_fb[screen];
+        display::draw_text_scaled(fb, x, y, text, scale);
+        if invert {
+            let s = scale.max(1);
+            let pad = 1;
+            let w = display::text_w(text, s) + pad * 2;
+            let h = 8 * s + pad * 2;
+            display::invert_rect(fb, x.saturating_sub(pad), y.saturating_sub(pad), w, h);
+        }
+        self.disp_fb_dirty = true;
+    }
+
+    /// style: 0 outline, 1 filled, 2 dashed outline, 3 dotted horizontal rule,
+    /// 4 invert the region.
+    fn display_fb_rect(
+        &mut self, screen: usize, x: usize, y: usize, w: usize, h: usize, style: usize,
+    ) {
+        if screen > 1 { return; }
+        let fb = &mut self.disp_fb[screen];
+        match style {
+            1 => display::fill_rect(fb, x, y, w, h),
+            2 => display::dashed_rect(fb, x, y, w, h),
+            3 => display::dotted_hline(fb, x, y, w),
+            4 => display::invert_rect(fb, x, y, w, h),
+            _ => display::rect(fb, x, y, w, h),
+        }
+        self.disp_fb_dirty = true;
+    }
+
+    /// Push both framebuffers if anything changed. Called from the 100 ms
+    /// display timer, never from the input path.
+    fn display_fb_flush(&mut self) {
+        if !self.disp_fb_dirty { return; }
+        self.disp_fb_dirty = false;
+        let left = self.disp_fb[0];
+        let right = self.disp_fb[1];
+        self.send_display_bits(0xE0, &left);
+        self.send_display_bits(0xE1, &right);
     }
 
     fn display_opts(&mut self, col: u8, reverse: bool, bands: usize) {

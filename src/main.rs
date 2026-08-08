@@ -214,6 +214,10 @@ fn ev_loop(dev: &mut dyn Maschine, mhandler: &mut MHandler, dev_path: &str) {
             // Normal rendering stays off - it issued ~180 writes/s of 521-byte
             // reports. Calibration redraws are rate-limited to this timer.
             dev.calib_flush();
+            // Screen framebuffers written over OSC land here too, for the same
+            // reason: pushing them from the OSC handler would interleave HID
+            // writes with the input reads.
+            dev.display_fb_flush();
             now_display = SystemTime::now();
         }
 
@@ -709,6 +713,42 @@ impl<'a> MHandler<'a> {
         } else if msg.path.starts_with("/maschine/display/calib") {
             if let [osc::Argument::i(on)] = msg.arguments[..] {
                 maschine.calib_set(on != 0);
+            }
+        } else if msg.path.starts_with("/maschine/display/fbclear") {
+            // Screen framebuffer commands. Screen 0 = left (0xE0), 1 = right
+            // (0xE1). Nothing reaches the hardware until the display timer
+            // flushes, so a whole screen is composed with several messages and
+            // shown in one write.
+            if let [osc::Argument::i(screen)] = msg.arguments[..] {
+                if screen >= 0 {
+                    maschine.display_fb_clear(screen as usize);
+                }
+            }
+        } else if msg.path.starts_with("/maschine/display/text") {
+            if let [
+                osc::Argument::i(screen), osc::Argument::i(x), osc::Argument::i(y),
+                osc::Argument::i(scale), osc::Argument::i(invert), osc::Argument::s(text),
+            ] = msg.arguments[..]
+            {
+                if screen >= 0 && x >= 0 && y >= 0 && scale >= 1 {
+                    maschine.display_fb_text(
+                        screen as usize, x as usize, y as usize, scale as usize,
+                        invert != 0, text,
+                    );
+                }
+            }
+        } else if msg.path.starts_with("/maschine/display/rect") {
+            if let [
+                osc::Argument::i(screen), osc::Argument::i(x), osc::Argument::i(y),
+                osc::Argument::i(w), osc::Argument::i(h), osc::Argument::i(style),
+            ] = msg.arguments[..]
+            {
+                if screen >= 0 && x >= 0 && y >= 0 && w >= 0 && h >= 0 && style >= 0 {
+                    maschine.display_fb_rect(
+                        screen as usize, x as usize, y as usize,
+                        w as usize, h as usize, style as usize,
+                    );
+                }
             }
         } else if msg.path.starts_with("/maschine/display/clear") {
             maschine.clear_screen();
