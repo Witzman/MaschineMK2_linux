@@ -1152,13 +1152,33 @@ impl Maschine for Mikro {
 
     /// Push both framebuffers if anything changed. Called from the 100 ms
     /// display timer, never from the input path.
+    ///
+    /// The framebuffer is addressed as the LOGICAL canvas - 512x32, each row
+    /// two physical pixels tall - and expanded here. Measured on the hardware
+    /// 2026-08-08 by drawing single rows and blocks and reading the panel:
+    ///
+    ///   logical 0-15  -> transfer rows 0-15  -> physical rows 0-31
+    ///   logical 16-31 -> transfer rows 32-47 -> physical rows 32-63
+    ///
+    /// Transfer rows 16-31 and 48-63 are discarded by the panel; a 1-row line
+    /// always comes back 2 px thick. That hole is why the earlier layout mock
+    /// fell apart below the top line: an 8-px glyph at y=12 needed rows 12-19
+    /// and lost everything from 16 up. Anything drawn at logical y >= 32 is
+    /// off-panel and dropped here rather than silently vanishing later.
     fn display_fb_flush(&mut self) {
         if !self.disp_fb_dirty { return; }
         self.disp_fb_dirty = false;
-        let left = self.disp_fb[0];
-        let right = self.disp_fb[1];
-        self.send_display_bits(0xE0, &left);
-        self.send_display_bits(0xE1, &right);
+        for screen in 0..2 {
+            let mut out = [0u8; display::HEIGHT * display::STRIDE];
+            for lrow in 0..display::LOGICAL_H {
+                let prow = display::logical_row(lrow);
+                let (src, dst) = (lrow * display::STRIDE, prow * display::STRIDE);
+                out[dst..dst + display::STRIDE]
+                    .copy_from_slice(&self.disp_fb[screen][src..src + display::STRIDE]);
+            }
+            let id = if screen == 0 { 0xE0 } else { 0xE1 };
+            self.send_display_bits(id, &out);
+        }
     }
 
     fn display_opts(&mut self, col: u8, reverse: bool, bands: usize) {

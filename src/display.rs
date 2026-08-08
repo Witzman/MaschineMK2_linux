@@ -13,6 +13,21 @@ pub const WIDTH: usize = 512;
 pub const HEIGHT: usize = 64;
 pub const STRIDE: usize = WIDTH / 8; // 64 bytes per row
 
+// The panel does not show all 64 transfer rows. Measured 2026-08-08 by
+// drawing one row at a time and reading the screen: transfer rows 0-15 land on
+// physical rows 0-31, rows 32-47 land on physical rows 32-63, and rows 16-31
+// and 48-63 are dropped. Every row therefore renders 2 px tall, which makes
+// the real drawing surface 512x32.
+//
+// Layouts address that LOGICAL canvas; logical_row() maps it to the transfer
+// row on flush. Ignoring this is what made the first layout mock unreadable:
+// an 8-px glyph at y=12 lost everything from row 16 upward.
+pub const LOGICAL_H: usize = 32;
+
+pub fn logical_row(lrow: usize) -> usize {
+    if lrow < 16 { lrow } else { lrow + 16 }
+}
+
 pub const TILE_W: usize = 128;       // pixels per report
 pub const TILE_STRIDE: usize = TILE_W / 8;
 pub const BAND_H: usize = 32;        // rows per report
