@@ -82,27 +82,35 @@ pub fn clear_pixel(bits: &mut [u8; HEIGHT * STRIDE], x: usize, y: usize) {
     bits[y * STRIDE + x / 8] &= !(0x80 >> (x % 8));
 }
 
+// A logical row is two physical pixels tall but one pixel wide, so a glyph
+// drawn 1:1 comes out at half its intended aspect - 5 wide by 16 tall, which
+// on the panel reads as a vertical smear rather than a letter. Every glyph is
+// therefore drawn at twice the horizontal scale, which the row doubling then
+// squares up: scale 1 is 10x8 logical = 10x16 physical, the proportions the
+// 5x8 font was cut for.
+pub const X_SCALE: usize = 2;
+
 /// Character cell width at a given scale, gap included.
-pub fn char_w(scale: usize) -> usize { 6 * scale.max(1) }
+pub fn char_w(scale: usize) -> usize { 6 * X_SCALE * scale.max(1) }
 
 /// Pixel width a string occupies at a given scale, trailing gap excluded.
 pub fn text_w(text: &str, scale: usize) -> usize {
     let n = text.len();
-    if n == 0 { 0 } else { n * char_w(scale) - scale.max(1) }
+    if n == 0 { 0 } else { n * char_w(scale) - X_SCALE * scale.max(1) }
 }
 
 pub fn draw_char_scaled(bits: &mut [u8; HEIGHT * STRIDE], px: usize, py: usize, c: u8, scale: usize) {
-    let s = scale.max(1);
-    if s == 1 { return draw_char(bits, px, py, c); }
+    let sy = scale.max(1);
+    let sx = sy * X_SCALE;
     let idx = match c { 32..=127 => (c - 32) as usize, _ => 0 };
     let glyph = &FONT5X8[idx];
     for col in 0..5 {
         let col_byte = glyph[col];
         for row in 0..8 {
             if (col_byte >> row) & 1 == 1 {
-                for dy in 0..s {
-                    for dx in 0..s {
-                        set_pixel(bits, px + col * s + dx, py + row * s + dy);
+                for dy in 0..sy {
+                    for dx in 0..sx {
+                        set_pixel(bits, px + col * sx + dx, py + row * sy + dy);
                     }
                 }
             }
@@ -114,7 +122,7 @@ pub fn draw_text_scaled(bits: &mut [u8; HEIGHT * STRIDE], px: usize, py: usize, 
     let s = scale.max(1);
     let mut x = px;
     for c in text.bytes() {
-        if x + 5 * s > WIDTH { break; }
+        if x + 5 * s * X_SCALE > WIDTH { break; }
         draw_char_scaled(bits, x, py, c, s);
         x += char_w(s);
     }
