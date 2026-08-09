@@ -488,33 +488,24 @@ impl Mikro {
 
     fn send_display_bits(&mut self, report_id: u8, bits: &[u8]) {
         debug_assert_eq!(bits.len(), display::HEIGHT * display::STRIDE);
-        // A 512x64 screen is sent as 8 reports, one per 64-pixel column strip
-        // over the full height: 8 bytes per row, 64 rows, 512 bytes. Header
-        // byte 1 is the column offset in 16-pixel units, byte 3 the first row.
-        let mut buf = [0u8; 1 + 8 + 512];
+        // A 256x64 screen is 8 reports, each a full-width band of 8 rows:
+        // header byte 5 = 0x20 bytes per row, byte 7 = 0x08 rows, byte 3 =
+        // chunk*8, byte 1 = 0. Payload is 256 bytes and the report is exactly
+        // 9 + 256 long - this is cabl's working transfer, byte for byte.
+        let mut buf = [0u8; 1 + 8 + display::CHUNK_BYTES];
         buf[0] = report_id;
-        buf[5] = 0x08;
-        buf[7] = 0x20;
+        buf[1] = self.disp_col;
+        buf[5] = display::HDR_ROW_BYTES;
+        buf[7] = display::HDR_ROWS;
 
-        for tile in 0..display::TILES {
-            for band in 0..display::BANDS.min(self.disp_bands.max(1)) {
-                buf[1] = self.disp_col + (tile * display::TILE_W / 16) as u8;
-                buf[3] = (band * display::BAND_H) as u8;
-                for row in 0..display::BAND_H {
-                    let src = (band * display::BAND_H + row) * display::STRIDE
-                        + tile * display::TILE_STRIDE;
-                    let dst = 9 + row * display::TILE_STRIDE;
-                    for i in 0..display::TILE_STRIDE {
-                        let byte = bits[src + i];
-                        buf[dst + i] = if self.disp_reverse {
-                            byte.reverse_bits()
-                        } else {
-                            byte
-                        };
-                    }
-                }
-                let _ = unistd::write(self.dev, &buf);
+        for chunk in 0..display::CHUNKS {
+            buf[3] = (chunk * display::CHUNK_ROWS) as u8;
+            let src = chunk * display::CHUNK_BYTES;
+            for i in 0..display::CHUNK_BYTES {
+                let byte = bits[src + i];
+                buf[9 + i] = if self.disp_reverse { byte.reverse_bits() } else { byte };
             }
+            let _ = unistd::write(self.dev, &buf);
         }
     }
 }
@@ -890,41 +881,12 @@ impl Maschine for Mikro {
     }
 
     fn clear_screen(&mut self) {
-        let mut screen_buf = [0u8; 1 + 8 + 512];
-        let mut screen_buf2 = [0u8; 1 + 8 + 512];
-
-        screen_buf[0] = 0xE0;
-        //screen_buf[3] = 16;
-        screen_buf[5] = 0x08;
-        screen_buf[7] = 0x20;
-
-        //screen_buf[16] = 0xFF;
-
-        screen_buf2[0] = 0xE1;
-        //screen_buf2[3] = 16;
-        screen_buf2[5] = 0x08;
-        screen_buf2[7] = 0x20;
-
-        let mut k = 0;
-        let mut t = 0;
-        while k < 9 {
-            screen_buf[1] = k * 4;
-            screen_buf2[1] = k * 4;
-            k += 1;
-
-            if k == 8 {
-                screen_buf[3] = t * 4;
-                screen_buf2[3] = t * 4;
-                if t < 8 {
-                    k = 0;
-                }
-                t += 1;
-            }
-            let _ = unistd::write(self.dev, &screen_buf);
-            let _ = unistd::write(self.dev, &screen_buf2);
-        }
-
-        println!("Screen clear done?");
+        // Was a hand-rolled sweep of overlapping regions with a stale header;
+        // a blank framebuffer through the one transfer path covers every
+        // pixel exactly once and cannot drift from it.
+        let blank = [0u8; display::HEIGHT * display::STRIDE];
+        self.send_display_bits(0xE0, &blank);
+        self.send_display_bits(0xE1, &blank);
     }
 
     fn write_screen(&mut self) {
@@ -1202,7 +1164,9 @@ impl Maschine for Mikro {
     fn display_opts(&mut self, col: u8, reverse: bool, bands: usize) {
         self.disp_col = col;
         self.disp_reverse = reverse;
-        self.disp_bands = bands.clamp(1, display::BANDS);
+        // Bands no longer select anything - a screen is always its 8 chunks -
+        // but the OSC path keeps its arity, so record it and ignore it.
+        self.disp_bands = bands;
         println!(
             "display opts: col={} reverse={} bands={}",
             self.disp_col, self.disp_reverse, self.disp_bands

@@ -1,41 +1,40 @@
 use crate::font::FONT5X8;
 
-// Measured on the hardware, not guessed. Each screen is 512x64, addressed
-// 1:1 - see TILE_W below for how a report maps onto it.
+// Each screen is 256x64, 1bpp row-major, MSB = leftmost pixel. Taken from
+// cabl's MaschineMK2 driver, which is known-working, and not from guesswork:
+// its setPixel is byte = widthBytes*y + x/8, bit = 0x80 >> (x%8) - the same
+// addressing this file already used.
 //
-// The old WIDTH of 128 is why text came out "readable but too big": it filled
-// a quarter of the panel, so everything looked magnified.
-pub const WIDTH: usize = 512;
+// Every earlier width was wrong. 128 made text "readable but too big" (it
+// filled half the panel). 512 came from reading header byte 1 as a 16-pixel
+// column offset when it is a byte offset, so 0/8/16/24 spans 0..256, not
+// 0..512.
+// 255 columns are on glass, verified: lines at x=248/251/254 all render and
+// 254 sits in the last physical column, while x=255 shows nothing. The row is
+// still 32 bytes - the 256th bit is transferred and discarded.
+pub const WIDTH: usize = 255;
 pub const HEIGHT: usize = 64;
-pub const STRIDE: usize = WIDTH / 8; // 64 bytes per row
+pub const STRIDE: usize = 32; // not WIDTH/8: the last byte is padding
 
-// With the tile geometry corrected the canvas is the panel: 512x64, one
-// logical row per physical row. The mapping is kept as an identity hook
-// because the earlier wrong geometry made it look as though rows were being
-// dropped, and a future panel variant may genuinely need one.
+// One logical row per physical row. Kept as an identity hook because the
+// earlier wrong geometry made it look as though rows were being dropped.
 pub const LOGICAL_H: usize = HEIGHT;
 
 pub fn logical_row(lrow: usize) -> usize { lrow }
 
-// A report is a 128x32 tile: the panel reads 16 bytes per row, 32 rows,
-// 512 bytes. Confirmed the hard way - feeding it 8-byte rows made every pair
-// of our rows land in one panel row, so text drawn past x=64 reappeared at
-// x=0 (a "wrap") and only half of each strip survived. 4-byte rows fragmented
-// it further still.
+// A report carries a full-width horizontal band of 8 rows: 32 bytes per row
+// x 8 rows = 256 payload bytes, which is what header bytes 5 and 7 declare
+// (0x20 = bytes per row, 0x08 = rows). Those two were swapped in this driver,
+// so the panel was told to expect a 64x32 region while it was fed 512 bytes
+// laid out 128 px wide - the whole reason the screens garbled.
 //
-// A full screen is therefore 4 column tiles (byte 1 = 0, 8, 16, 24 in 16-px
-// units) by 2 row bands (byte 3 = 0, 32). BOTH bands must be sent: byte 7 is
-// 0x20, so one report only ever covers 32 rows, and sending a single band per
-// tile leaves rows 32-63 holding whatever was on the panel before.
-pub const TILE_W: usize = 128;       // pixels per report
-pub const TILE_STRIDE: usize = TILE_W / 8;
-// Header byte 7 is 0x20: a report carries 32 rows, so each 64-px strip needs
-// two of them - byte 3 = 0 and 32. Sending one 64-row report per strip left
-// rows 32-63 holding whatever was on the panel before, which is exactly how
-// stale text survived a full redraw.
-pub const BAND_H: usize = 32;        // rows per report
-pub const TILES: usize = WIDTH / TILE_W;
-pub const BANDS: usize = HEIGHT / BAND_H;
+// A screen is 8 such bands, header byte 3 = chunk*8, byte 1 = 0. The
+// framebuffer slices straight into them: no tiling, no column offset.
+pub const HDR_ROW_BYTES: u8 = 0x20;  // header[5]
+pub const HDR_ROWS: u8 = 0x08;       // header[7]
+pub const CHUNK_ROWS: usize = HDR_ROWS as usize;
+pub const CHUNK_BYTES: usize = STRIDE * CHUNK_ROWS; // 256
+pub const CHUNKS: usize = HEIGHT / CHUNK_ROWS;      // 8
 
 pub fn clear(bits: &mut [u8; HEIGHT * STRIDE]) {
     for b in bits.iter_mut() { *b = 0; }
@@ -212,6 +211,15 @@ mod tests {
     fn set_pixel_out_of_bounds_does_not_panic() {
         let mut bits = [0u8; HEIGHT * STRIDE];
         set_pixel(&mut bits, 200, 200);
+    }
+
+    #[test]
+    fn chunks_tile_the_framebuffer_exactly() {
+        // The transfer is a straight slice of the framebuffer; if these ever
+        // stop matching, part of the screen goes stale or reads past the end.
+        assert_eq!(CHUNKS * CHUNK_BYTES, HEIGHT * STRIDE);
+        assert_eq!(CHUNK_BYTES, HDR_ROW_BYTES as usize * HDR_ROWS as usize);
+        assert_eq!(STRIDE, HDR_ROW_BYTES as usize);
     }
 
     #[test]
