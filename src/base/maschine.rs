@@ -262,6 +262,14 @@ pub trait Maschine {
     fn set_roller_status(&mut self, status: i32, idx: usize);
     fn get_roller_status(&self, idx: usize) -> i32;
 
+    /// The CC value an encoder currently reports, 0-127. Held here rather
+    /// than recomputed from the hardware counter so a host can re-centre it:
+    /// the encoders are endless, and a host that maps one knob onto several
+    /// parameters has to move the reported position when it switches between
+    /// them, or the knob sits against an end stop it cannot leave.
+    fn set_roller_value(&mut self, value: i32, idx: usize);
+    fn get_roller_value(&self, idx: usize) -> i32;
+
     fn set_pad_light(&mut self, pad_idx: usize, color: u32, brightness: f32);
     fn set_button_light(&mut self, btn: MaschineButton, color: u32, brightness: f32);
 

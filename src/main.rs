@@ -766,6 +766,16 @@ impl<'a> MHandler<'a> {
                     maschine.set_raw_light(buffer as usize, index as usize, value as u8);
                 }
             }
+        } else if msg.path.starts_with("/maschine/encoder") {
+            // Re-centre an encoder: idx 0-7, value 0-127. A host that points
+            // one endless knob at several parameters uses this when it
+            // switches between them, so the knob is never parked against an
+            // end stop belonging to a parameter it no longer controls.
+            if let [osc::Argument::i(idx), osc::Argument::i(value)] = msg.arguments[..] {
+                if (0..8).contains(&idx) && (0..=127).contains(&value) {
+                    maschine.set_roller_value(value, idx as usize);
+                }
+            }
         } else if msg.path.starts_with("/maschine/midi_note_base") {
             match msg.arguments.len() {
                 1 => {
@@ -1308,11 +1318,19 @@ impl<'a> MHandler<'a> {
         let state = maschine.get_roller_state(idx);
         let accumulated = raw / 4 + state as i32 * 64;
         let prev = maschine.get_roller_status(idx);
-        if (accumulated - prev).abs() < 40 {
-            let value = accumulated.clamp(0, 127) as u8;
+        let delta = accumulated - prev;
+        // A wrap of the hardware counter shows up as a jump far larger than
+        // any real movement, so it is not reported. The baseline still has to
+        // be resynced to it: leaving the old one in place makes every later
+        // delta measure the wrap's size as well, so every one of them is
+        // rejected too and the encoder goes dead until the counter comes back
+        // round. One wrap should cost one message, not the knob.
+        maschine.set_roller_status(accumulated, idx);
+        if !cc_math::is_encoder_jump(delta) {
+            let value = cc_math::accumulate_encoder(maschine.get_roller_value(idx), delta);
             let cc_num = self.encoder_ccs[idx];
             let msg = Message::RPN7(Ch1, cc_num, value);
-            maschine.set_roller_status(accumulated, idx);
+            maschine.set_roller_value(value as i32, idx);
             self.seq_port.send_message(&msg).unwrap();
             self.seq_handle.drain_output();
             let _ = self.event_tx.send(DeviceEvent::Encoder { idx, value });

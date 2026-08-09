@@ -315,6 +315,7 @@ pub struct Mikro {
     midi_note_base: u8,
     roller_state: [usize; 9],
     roller_status: [i32; 9],
+    roller_value: [i32; 9],
     mod_state: usize,
     padmode: usize,
 
@@ -383,6 +384,7 @@ impl Mikro {
             midi_note_base: 48,
             roller_state: [0usize; 9],
             roller_status: [0i32; 9],
+            roller_value: [0i32; 9],
             mod_state: 0,
             padmode: 0,
 
@@ -599,6 +601,16 @@ impl Maschine for Mikro {
 
     fn get_roller_state(&self, idx: usize) -> usize {
         return self.roller_state[idx];
+    }
+
+    fn set_roller_value(&mut self, value: i32, idx: usize) {
+        if idx < self.roller_value.len() {
+            self.roller_value[idx] = value.clamp(0, 127);
+        }
+    }
+
+    fn get_roller_value(&self, idx: usize) -> i32 {
+        if idx < self.roller_value.len() { self.roller_value[idx] } else { 0 }
     }
 
     fn set_roller_status(&mut self, status: i32, idx: usize) {
