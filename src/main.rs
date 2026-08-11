@@ -1132,6 +1132,24 @@ impl<'a> MHandler<'a> {
                     self.seq_port.send_message(&msg).unwrap();
                     self.seq_handle.drain_output();
                 }
+                // SHIFT also stays an internal modifier - the set_mod block
+                // above runs first and does not return, so it keeps gating PAD
+                // MODE and the B6 encoder while the host sees it too.
+                "shift" => {
+                    let msg = Message::RPN7(Ch1, 49, cc_math::button_cc_value(is_down));
+                    self.seq_port.send_message(&msg).unwrap();
+                    self.seq_handle.drain_output();
+                }
+                "swing" => {
+                    let msg = Message::RPN7(Ch1, 50, cc_math::button_cc_value(is_down));
+                    self.seq_port.send_message(&msg).unwrap();
+                    self.seq_handle.drain_output();
+                }
+                "volume" => {
+                    let msg = Message::RPN7(Ch1, 51, cc_math::button_cc_value(is_down));
+                    self.seq_port.send_message(&msg).unwrap();
+                    self.seq_handle.drain_output();
+                }
 
                 "B6" => {
                     let idx = 1;
